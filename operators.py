@@ -1,8 +1,9 @@
+from .functions import *
+from .classes import *
+
 import bpy
 import os
 from bpy_extras.io_utils import ImportHelper
-from . import functions
-from . import loaders
 from bpy.types import (
     Operator,
     Collection,
@@ -95,7 +96,20 @@ class SCENEITEMS_OT_apply(Operator):
             self.report({'WARNING'}, "No item selected")
             return {'CANCELLED'}
         item = scene.scene_items[index]
-        functions.apply_naming(item)
+        apply_naming(item)
+        self.report({'INFO'},"Applying changes...")
+        return {'FINISHED'}
+
+class SCENEITEMS_OT_apply_all(Operator):
+    bl_idname = "sceneitems.apply_all"
+    bl_label = "Apply All"
+    bl_description = "Apply all Items changes to all Collections"
+
+    def execute(self, context):
+        scene = context.scene
+        for item in scene.scene_items:
+            if item.sku != "" and item.collection is not None:
+                apply_naming(item)
         self.report({'INFO'},"Applying changes...")
         return {'FINISHED'}
 
@@ -247,11 +261,11 @@ class PROPERTIES_OT_dirpath(Operator):
             blend_dir = os.path.dirname(blend_path) if blend_path else ""
             start_path = blend_dir if blend_dir and os.path.exists(blend_dir) else os.path.expanduser("~/Documents")
         self.directory = start_path
-        self.filter_glob = "DIR_PATH"  # Force directory selection
+        #self.filter_glob = "DIR_PATH"  # Force directory selection
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
-class PROPERTIES_OT_filepath(bpy.types.Operator):
+class PROPERTIES_OT_filepath(Operator):
     bl_idname = "ui.select_filepath"
     bl_label = "Select File"
 

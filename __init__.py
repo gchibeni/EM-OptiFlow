@@ -36,7 +36,6 @@ from bpy.types import (
 )
 from . import auto_load
 from . import panels
-from . import loaders
 
 auto_load.init()
 
