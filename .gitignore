@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[oc]
+*.py.zip
+
+# Blender
+*.blend1
+*.blend2
+# Ignore actual blend files used for testing if necessary
+# *.blend
+
+# IDE/Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Addon specific
+# If your addon generates specific output files, list them here
