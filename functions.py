@@ -460,6 +460,7 @@ def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_ove
         item = bpy.context.scene.scene_items.add()
         item.item_type = 'TILE/MATERIAL'
         item.subfolder = subfolder.strip()
+        item.mesh_type = fbx_key.upper() if fbx_key else 'TILES'
         item.collection = collection
         import_textures(obj, texture_folder, texture_size, basecolor_override)
     return obj
