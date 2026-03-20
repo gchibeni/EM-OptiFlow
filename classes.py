@@ -30,12 +30,24 @@ class SceneItem(PropertyGroup):
         ],
         default='OBJECT'
     ) # type: ignore
-    sku: StringProperty(name="SKU")  # type: ignore
-    subfolder: StringProperty(name="Subfolder")  # type: ignore
     collection: PointerProperty(
         name="Collection",
         type=Collection
     )  # type: ignore
+    sku: StringProperty(name="SKU")  # type: ignore
+    subfolder: StringProperty(name="Subfolder")  # type: ignore
+    textures_path: StringProperty(name="Textures")  # type: ignore
+    textures_size: EnumProperty(
+        name="Texture Size",
+        items=[
+            ('512', "512", ""),
+            ('1024', "1024", ""),
+            ('2048', "2048", ""),
+            ('4096', "4096", ""),
+            ('8192', "8192", "")
+        ],
+        default='4096'
+    ) # type: ignore
 
 class ExporterItem(PropertyGroup):
     exporter_type: EnumProperty(

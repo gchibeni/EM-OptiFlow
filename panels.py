@@ -119,11 +119,15 @@ class SCENEITEMS_PT_optimization(Panel):
             if scene.scene_items and scene.scene_items_index >= 0:
                 item = scene.scene_items[scene.scene_items_index]
                 box = layout.box()
+                box.prop(item, "item_type")
+                box.separator(type="LINE")
+                box.prop(item, "collection")
                 box.prop(item, "sku")
                 box.prop(item, "subfolder")
-                box.prop(item, "item_type")
-                box.prop(item, "collection")
-
+                box.separator(type="LINE")
+                dir_input(box, item, "Textures:", "textures_path")
+                box.prop(item, "textures_size")
+                box.separator(type="LINE")
                 row = box.row()
                 row.enabled = item.collection is not None and item.sku != "" # Disable if empty
                 row.operator("sceneitems.apply")
@@ -131,7 +135,6 @@ class SCENEITEMS_PT_optimization(Panel):
                 row = layout.row()
                 row.operator("sceneitems.apply_all")
                 row.enabled = any(i.collection and i.sku for i in scene.scene_items)
-
 
 # endregion
 
@@ -142,7 +145,6 @@ class IMPORT_OT_popup(Operator):
     bl_label = "Import"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # Common properties
     def draw(self, context):
         layout = self.layout
         scene = context.scene
@@ -157,7 +159,6 @@ class IMPORT_OT_popup(Operator):
 
     def execute(self, context):
         scene = context.scene
-        self.report({'INFO'}, f"Importing {scene.import_type}")
         match scene.import_type:
             case 'OBJECT':
                 if not scene.import_model:
@@ -169,13 +170,13 @@ class IMPORT_OT_popup(Operator):
                 self.report({'INFO'}, f"Model: {scene.import_model}")
                 self.report({'INFO'}, f"Collider: {scene.import_collider}")
                 self.report({'INFO'}, f"Texture Folder: {scene.import_texture_folder}")
+                return {'FINISHED'}
             case 'TILES/MATERIALS':
                 if not scene.import_texture_folder:
                     self.report({'ERROR'}, "Texture folder is required for Tiles/Materials import.")
                     return {'CANCELLED'}
                 tiles = import_tiles(scene.import_texture_folder, scene.import_texture_size)
-                self.report({'INFO'}, f"Texture Folder: {scene.import_texture_folder}")
-                self.report({'INFO'}, f"Texture Size: {scene.import_texture_size}")
+                return {'FINISHED'}
         return {'FINISHED'}
 
     def invoke(self, context, event):

@@ -5,6 +5,17 @@ import math
 from bpy.types import Scene, UILayout
 from datetime import date
 
+# region Variables
+
+basecolor_names = ["basecolor", "albedo", "diffuse", "base_color", "color"]
+roughness_names = ["roughness", "rough", "rmap"]
+reflect_names = ["reflect", "reflective", "reflection", "specular"]
+metallic_names = ["metallic", "metal", "metalness"]
+normal_names = ["normal", "nmap"]
+fbx_map = {"Bullnose": "MESH_BULLNOSE.fbx", "Covebase": "MESH_COVEBASE.fbx"}
+
+# endregion
+
 # region General
 
 def purge_unused_data():
@@ -32,6 +43,10 @@ def dir_input(layout: UILayout, context, label, target_prop):
     row.prop(context, target_prop, text="")
     op = row.operator("ui.select_dirpath", text="", icon='FILE_FOLDER')
     op.target_prop = target_prop
+    try:
+        op.data_path = context.path_from_id()
+    except (ValueError, AttributeError):
+        op.data_path = ""
 
 def file_input(layout: UILayout, context, label, target_prop, file_types=""):
     split = layout.split(factor=0.3)
@@ -41,6 +56,10 @@ def file_input(layout: UILayout, context, label, target_prop, file_types=""):
     op = row.operator("ui.select_filepath", text="", icon='FILE_FOLDER')
     op.target_prop = target_prop
     op.file_types = file_types
+    try:
+        op.data_path = context.path_from_id()
+    except (ValueError, AttributeError):
+        op.data_path = ""
 
 def arrange_nodes(node_tree):
     nodes = node_tree.nodes
@@ -84,7 +103,7 @@ def get_item_name(item) -> str:
     item_name = f"{code}_{sku}".upper().replace(" ", "")
     return item_name
 
-def apply_naming(item):
+def apply_item_changes(item):
     if not item.collection:
         print("No collection assigned")
         return
@@ -135,6 +154,10 @@ def apply_naming(item):
     rename_material(col_obj, "ColMat")
     rename_material(mesh_obj, "Mat")
 
+    if mesh_obj and item.textures_path:
+        import_textures(mesh_obj, item.textures_path, item.textures_size)
+    #item.textures_path = ""
+
     print(f"Renamed Mesh: {mesh_obj.name if mesh_obj else 'None'}")
     print(f"Renamed Col: {col_obj.name if col_obj else 'None'}")
 
@@ -146,6 +169,9 @@ def rename_material(obj, new_name):
         mat = slot.material
         if mat:
             mat.name = new_name
+            bsdf = mat.node_tree.nodes.get("Principled BSDF")
+            if bsdf and new_name == "ColMat":
+                bsdf.inputs["Alpha"].default_value = 0
         else:
             no_mat = True
     if len(obj.material_slots) == 0:
@@ -158,6 +184,8 @@ def rename_material(obj, new_name):
         bsdf = new_mat.node_tree.nodes.get("Principled BSDF")
         if bsdf:
             bsdf.inputs["Base Color"].default_value = (0.8, 0.8, 0.8, 1)
+            if new_name == "ColMat":
+                bsdf.inputs["Alpha"].default_value = 0
         # Assign to all slots
         for i in range(len(obj.material_slots)):
             obj.material_slots[i].material = new_mat
@@ -304,6 +332,16 @@ def find_texture(folder, keywords):
                 return os.path.join(folder, f)
     return None
 
+def find_textures(folder, keywords):
+    matches = []
+    for f in os.listdir(folder):
+        name = f.lower()
+        for kw in keywords:
+            if kw.lower() in name:
+                matches.append(os.path.join(folder, f))
+                break
+    return matches
+
 def add_tex_node(image, label, nodes, sRGB = True):
     tex_node = nodes.new(type="ShaderNodeTexImage")
     tex_node.image = image
@@ -322,55 +360,70 @@ def clean_name(name, keywords):
     name_lower = name_lower.strip('-_')
     return name_lower
 
-def import_tile_mesh(texture_folder, texture_size):
-    max_size = int(texture_size)
-    # Find textures
-    possible_basecolor_names = ["basecolor", "albedo", "diffuse", "base_color", "color"]
-    basecolor_path = find_texture(texture_folder, possible_basecolor_names)
-    roughness_path = find_texture(texture_folder, ["roughness", "rough", "rmap"])
-    reflect_path = find_texture(texture_folder, ["reflect", "reflective", "reflection", "specular"])
-    metallic_path = find_texture(texture_folder, ["metallic", "metal", "metalness"])
-    normal_path = find_texture(texture_folder, ["normal", "nmap"])
-    if not basecolor_path:
-        return None
-    # Name based on basecolor
-    name = clean_name(os.path.splitext(os.path.basename(basecolor_path))[0], possible_basecolor_names)
-    # Object setup
-    plane = bpy.data.objects.get(name)
-    if plane:
-        # Reuse existing object
-        bpy.context.view_layer.objects.active = plane
-    else:
-        bpy.ops.mesh.primitive_plane_add(size=1, rotation=(math.radians(-90), 0, 0))
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        plane = bpy.context.active_object
-        plane.name = name
+def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_override = None):
+    folder_name = os.path.basename(texture_folder) if subfolder == "" else subfolder
+    folder_lower = folder_name.lower()
+    basecolor_path = find_texture(texture_folder, basecolor_names) if not basecolor_override else basecolor_override
+    name = clean_name(os.path.splitext(os.path.basename(basecolor_path))[0], basecolor_names)
+    fbx_key = next((k for k in fbx_map if k.lower() in folder_lower), None)
+    if fbx_key:
+        name = name + "_" + fbx_key.lower()
+    # Reuse existing object if already imported
+    obj = bpy.data.objects.get(name)
+    if not obj:
+        addon_dir = os.path.dirname(os.path.realpath(__file__))
+        if fbx_key:
+            fbx_path = os.path.join(addon_dir, "Meshes", fbx_map[fbx_key])
+            before = set(bpy.data.objects)
+            bpy.ops.import_scene.fbx(filepath=fbx_path)
+            new_objs = [o for o in bpy.data.objects if o not in before]
+            obj = new_objs[0] if new_objs else bpy.context.active_object
+        else:
+            bpy.ops.mesh.primitive_plane_add(size=1, rotation=(math.radians(90), 0, 0))
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            obj = bpy.context.active_object
+        if not obj:
+            return None
+        obj.name = name
     # Collection setup
     collection = bpy.data.collections.get(name)
     if not collection:
         collection = bpy.data.collections.new(name)
         bpy.context.scene.collection.children.link(collection)
-        for col in plane.users_collection:
-            col.objects.unlink(plane)
-        collection.objects.link(plane)
+        for col in obj.users_collection:
+            col.objects.unlink(obj)
+        collection.objects.link(obj)
+    # SceneItem setup
     item = next((i for i in bpy.context.scene.scene_items if i.collection == collection), None)
     if not item:
-        # Assign it to a SceneItem
         item = bpy.context.scene.scene_items.add()
         item.item_type = 'TILE/MATERIAL'
-        item.subfolder = ""
+        item.subfolder = subfolder.strip()
         item.collection = collection
-    # Material setup
-    if plane.data.materials:
-        mat = plane.data.materials[0]
+        import_textures(obj, texture_folder, texture_size, basecolor_override)
+    return obj
+
+def import_textures(obj, texture_folder, texture_size, basecolor_override):
+    if not obj:
+        return None
+    max_size = int(texture_size)
+    # Find textures
+    basecolor_path = find_texture(texture_folder, basecolor_names) if not basecolor_override else basecolor_override
+    roughness_path = find_texture(texture_folder, roughness_names)
+    reflect_path = find_texture(texture_folder, reflect_names)
+    metallic_path = find_texture(texture_folder, metallic_names)
+    normal_path = find_texture(texture_folder, normal_names)
+    if not basecolor_path:
+        return obj
+    # Material setup — reuse existing or create new
+    if obj.data.materials:
+        mat = obj.data.materials[0]
     else:
         mat = bpy.data.materials.new("Mat")
         mat.use_nodes = True
-        plane.data.materials.append(mat)
+        obj.data.materials.append(mat)
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
-    # If material is empty or you want to rebuild
-    # if len(nodes) <= 2:
     nodes.clear()
     # Core nodes
     bsdf = nodes.new(type="ShaderNodeBsdfPrincipled")
@@ -378,27 +431,24 @@ def import_tile_mesh(texture_folder, texture_size):
     output = nodes.new(type="ShaderNodeOutputMaterial")
     output.location = (300, 0)
     links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+    # Load textures
     basecolor_tex = load_and_resize_texture(basecolor_path, max_size, True)
     roughness_tex = load_and_resize_texture(roughness_path, max_size, False) if roughness_path else None
     reflect_tex = load_and_resize_texture(reflect_path, max_size, False) if reflect_path else None
     metallic_tex = load_and_resize_texture(metallic_path, max_size, False) if metallic_path else None
     normal_tex = load_and_resize_texture(normal_path, max_size, False) if normal_path else None
-    # Apply nodes
+    # Wire nodes
     def get_or_create_tex(label, image, sRGB=True):
         for n in nodes:
             if n.type == 'TEX_IMAGE' and n.label == label:
                 return n
-        node = add_tex_node(image, label, nodes, sRGB=sRGB)
-        return node
-    # Basecolor
+        return add_tex_node(image, label, nodes, sRGB=sRGB)
     if basecolor_tex:
         node = get_or_create_tex("BaseColor", basecolor_tex, True)
         links.new(node.outputs['Color'], bsdf.inputs['Base Color'])
-    # Roughness
     if roughness_tex:
         node = get_or_create_tex("Roughness", roughness_tex, False)
         links.new(node.outputs['Color'], bsdf.inputs['Roughness'])
-    # Reflect → invert → roughness
     if reflect_tex:
         refl_node = get_or_create_tex("Reflect", reflect_tex, False)
         invert_node = next((n for n in nodes if n.type == 'INVERT'), None)
@@ -406,11 +456,9 @@ def import_tile_mesh(texture_folder, texture_size):
             invert_node = nodes.new(type="ShaderNodeInvert")
         links.new(refl_node.outputs['Color'], invert_node.inputs['Color'])
         links.new(invert_node.outputs['Color'], bsdf.inputs['Roughness'])
-    # Metallic
     if metallic_tex:
         node = get_or_create_tex("Metallic", metallic_tex, False)
         links.new(node.outputs['Color'], bsdf.inputs['Metallic'])
-    # Normal
     if normal_tex:
         norm_node = get_or_create_tex("Normal", normal_tex, False)
         norm_map = next((n for n in nodes if n.type == 'NORMAL_MAP'), None)
@@ -418,15 +466,32 @@ def import_tile_mesh(texture_folder, texture_size):
             norm_map = nodes.new(type="ShaderNodeNormalMap")
         links.new(norm_node.outputs['Color'], norm_map.inputs['Color'])
         links.new(norm_map.outputs['Normal'], bsdf.inputs['Normal'])
-    # Arrange nodes to make it readable
     arrange_nodes(mat.node_tree)
-    return plane
+    return obj
 
-def import_tiles(texture_folder, texture_size):
-    path = bpy.path.abspath(texture_folder)
-    # TODO: For each folder in the directory, find variations and import as separate items.
-    import_tile_mesh(path, texture_size)
-    # Removed all unused assets.
+def start_tiles_import(texture_folder, texture_size):
+    import_tiles(texture_folder, texture_size)
     purge_unused_data()
+
+def import_tiles(texture_folder, texture_size, subfolder="", depth=0):
+    if depth >= 4:
+        return
+    path = bpy.path.abspath(texture_folder)
+    # Check if there's tiles in folder
+    for basecolor in find_textures(path, basecolor_names):
+            create_tile_mesh(path, texture_size, subfolder, basecolor)
+    # Check if there's subfolders
+    subfolders = [e for e in os.scandir(path) if e.is_dir()]
+    if subfolders:
+        for entry in subfolders:
+            subfolder_name = entry.name if subfolder == "" else os.path.join(subfolder, entry.name)
+            subfolder_path = entry.path
+            import_tiles(subfolder_path, texture_size, subfolder_name, depth + 1)
+
+def start_object_import():
+    pass
+
+def import_object():
+    pass
 
 # endregion

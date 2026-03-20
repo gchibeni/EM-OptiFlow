@@ -75,6 +75,7 @@ def register():
 
 def unregister():
     auto_load.unregister()
+    del Scene.show_items
     del Scene.scene_items
     del Scene.scene_items_index
     del Scene.show_exporters
@@ -87,4 +88,5 @@ def unregister():
     del Scene.import_collider
     del Scene.import_texture_folder
     del Scene.import_type
+    del Scene.import_texture_size
 

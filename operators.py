@@ -96,7 +96,7 @@ class SCENEITEMS_OT_apply(Operator):
             self.report({'WARNING'}, "No item selected")
             return {'CANCELLED'}
         item = scene.scene_items[index]
-        apply_naming(item)
+        apply_item_changes(item)
         self.report({'INFO'},"Applying changes...")
         return {'FINISHED'}
 
@@ -109,7 +109,7 @@ class SCENEITEMS_OT_apply_all(Operator):
         scene = context.scene
         for item in scene.scene_items:
             if item.sku != "" and item.collection is not None:
-                apply_naming(item)
+                apply_item_changes(item)
         self.report({'INFO'},"Applying changes...")
         return {'FINISHED'}
 
@@ -225,10 +225,11 @@ class PROPERTIES_OT_dirpath(Operator):
 
     directory: StringProperty(options={'HIDDEN'}) #type: ignore # Stores the final path
     target_prop: StringProperty(options={'HIDDEN'})  #type: ignore # Property to set
+    data_path: StringProperty(options={'HIDDEN'})  #type: ignore # Path to resolve target object
     filter_glob: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
 
     def execute(self, context):
-        target = context.scene
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
         path = bpy.path.abspath(self.directory)
         # Show error if not a file
         if not os.path.isdir(path):
@@ -247,7 +248,7 @@ class PROPERTIES_OT_dirpath(Operator):
         return {'FINISHED'}
 
     def invoke(self, context, event):
-        target = context.scene
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
         current_path = getattr(target, self.target_prop, "")
         # Determine starting path
         if current_path:
@@ -271,11 +272,12 @@ class PROPERTIES_OT_filepath(Operator):
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH") #type: ignore
     target_prop: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
+    data_path: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore # Path to resolve target object
     file_types: bpy.props.StringProperty(default="", options={'HIDDEN'}) #type: ignore
     filter_glob: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
 
     def execute(self, context):
-        target = context.scene
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
         # Resolve full path
         path = bpy.path.abspath(self.filepath)
         # Show error if not a file
@@ -296,7 +298,7 @@ class PROPERTIES_OT_filepath(Operator):
         return {'FINISHED'}
 
     def invoke(self, context, event):
-        target = context.scene
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
         current_path = getattr(target, self.target_prop, "")
         # Determine starting path
         if current_path:
