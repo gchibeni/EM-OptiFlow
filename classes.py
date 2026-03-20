@@ -48,6 +48,16 @@ class SceneItem(PropertyGroup):
         ],
         default='4096'
     ) # type: ignore
+    mesh_type: EnumProperty(
+        name="Mesh Type",
+        items=[
+            ('TILES', "Tiles", ""),
+            ('BULLNOSE', "Bullnose", ""),
+            ('COVEBASE', "Covebase", ""),
+        ],
+        default='TILES'
+    ) # type: ignore
+
 
 class ExporterItem(PropertyGroup):
     exporter_type: EnumProperty(

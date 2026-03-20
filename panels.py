@@ -99,6 +99,7 @@ class SCENEITEMS_PT_optimization(Panel):
         row.label(text="Items")
         if scene.show_items:
             row = layout.row()
+            row = layout.row()
             # List
             row.template_list(
                 "SCENEITEMS_UL_list",
@@ -115,6 +116,8 @@ class SCENEITEMS_PT_optimization(Panel):
             col.separator()
             col.operator("sceneitems.move_up", icon='TRIA_UP', text="")
             col.operator("sceneitems.move_down", icon='TRIA_DOWN', text="")
+            col.separator()
+            col.prop(scene, "scene_items_isolate", text="", icon="HIDE_ON" if scene.scene_items_isolate else "HIDE_OFF", toggle=True)
             # Active item properties
             if scene.scene_items and scene.scene_items_index >= 0:
                 item = scene.scene_items[scene.scene_items_index]
@@ -127,6 +130,8 @@ class SCENEITEMS_PT_optimization(Panel):
                 box.separator(type="LINE")
                 dir_input(box, item, "Textures:", "textures_path")
                 box.prop(item, "textures_size")
+                if item.item_type == 'TILE/MATERIAL':
+                    box.prop(item, "mesh_type")
                 box.separator(type="LINE")
                 row = box.row()
                 row.enabled = item.collection is not None and item.sku != "" # Disable if empty
@@ -236,10 +241,12 @@ class EXPORT_OT_popup(Operator):
                 dir_input(box, exporter, "Override Path:", "override_path")
                 box.prop(exporter, "prefix")
                 set_box = layout.box()
-                set_box.prop(exporter, "scale")
-                set_box.prop(exporter, "apply_transforms")
+                if exporter.exporter_type != 'GLTF':
+                    set_box.prop(exporter, "scale")
+                    set_box.prop(exporter, "apply_transforms")
                 set_box.prop(exporter, "embed_materials")
-                set_box.prop(exporter, "animations")
+                if exporter.exporter_type != 'OBJ':
+                    set_box.prop(exporter, "animations")
 
     def execute(self, context):
         scene = context.scene

@@ -135,13 +135,45 @@ def apply_item_changes(item):
             objects,
             key=lambda o: len(o.data.vertices)
         )
-
-        if not col_obj:
-            col_obj = sorted_objs[0]  # least verts
-
         if not mesh_obj:
             mesh_obj = sorted_objs[-1]  # most verts
-    # 3. Rename safely
+        if not col_obj:
+            least_verts_obj = sorted_objs[0]
+            if mesh_obj != least_verts_obj:
+                col_obj = least_verts_obj # least verts
+
+    # 3. Swap mesh for TILE/MATERIAL based on mesh_type
+    if item.item_type == 'TILE/MATERIAL' and mesh_obj:
+        fbx_key = item.mesh_type.title()  # 'BULLNOSE' → 'Bullnose', 'TILES' → 'Tiles'
+        addon_dir = os.path.dirname(os.path.realpath(__file__))
+        if fbx_key in fbx_map:
+            fbx_path = os.path.join(addon_dir, "Meshes", fbx_map[fbx_key])
+            before = set(bpy.data.objects)
+            bpy.ops.import_scene.fbx(filepath=fbx_path)
+            new_objs = [o for o in bpy.data.objects if o not in before]
+            new_obj = new_objs[0] if new_objs else None
+        else:
+            # TILES → plane
+            bpy.ops.mesh.primitive_plane_add(size=1, rotation=(math.radians(90), 0, 0))
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+            new_obj = bpy.context.active_object
+        if new_obj and new_obj != mesh_obj:
+            # Transfer materials
+            new_obj.data.materials.clear()
+            for mat in mesh_obj.data.materials:
+                new_obj.data.materials.append(mat)
+            # Move to item collection
+            for col in list(new_obj.users_collection):
+                col.objects.unlink(new_obj)
+            item.collection.objects.link(new_obj)
+            # Remove old object and its mesh data
+            old_data = mesh_obj.data
+            bpy.data.objects.remove(mesh_obj)
+            if old_data.users == 0:
+                bpy.data.meshes.remove(old_data)
+            mesh_obj = new_obj
+
+    # 4. Rename safely
     def rename(obj, new_name):
         if not obj:
             return
@@ -193,6 +225,33 @@ def rename_material(obj, new_name):
         if len(obj.material_slots) == 0:
             obj.data.materials.append(new_mat)
 
+def get_layer_collection(layer_coll, collection):
+    if layer_coll.collection == collection:
+        return layer_coll
+    for child in layer_coll.children:
+        result = get_layer_collection(child, collection)
+        if result:
+            return result
+    return None
+
+def isolate_items_collection(self, context):
+    scene = context.scene
+    if not scene.scene_items_isolate:
+        for item in scene.scene_items:
+            if item.collection:
+                lc = get_layer_collection(context.view_layer.layer_collection, item.collection)
+                if lc:
+                    lc.hide_viewport = False
+        return
+    if not scene.scene_items or scene.scene_items_index < 0:
+        return
+    selected = scene.scene_items[scene.scene_items_index]
+    for item in scene.scene_items:
+        if item.collection:
+            lc = get_layer_collection(context.view_layer.layer_collection, item.collection)
+            if lc:
+                lc.hide_viewport = (item.collection != selected.collection)
+
 # endregion
 
 # region Exporter
@@ -225,6 +284,7 @@ def export_item(item, exporter):
     item_name = prefix + get_item_name(item)
     collection = item.collection
     print(f"Exporting {collection.name} = {item_name} | {get_copyright()}")
+    os.makedirs(final_path, exist_ok=True)
     bpy.ops.object.select_all(action='DESELECT')
     objs = [obj for obj in collection.all_objects if obj.type == 'MESH']
     if not objs:
@@ -232,40 +292,39 @@ def export_item(item, exporter):
     for obj in objs:
         obj.select_set(True)
     bpy.context.view_layer.objects.active = objs[0]
-    for exporter in bpy.context.scene.exporters:
-        match exporter.exporter_type:
-            case 'GLTF':
-                bpy.ops.export_scene.gltf(
-                    use_selection=True,
-                    filepath=os.path.join(final_path, f"{item_name}.glb"),
-                    export_format='GLB' if exporter.embed_materials else 'GLTF_SEPARATE',
-                    check_existing=True,
-                    export_animations=exporter.animations,
-                    export_jpeg_quality=70,
-                    export_image_format='JPEG',
-                    export_materials='EXPORT',
-                    export_copyright=get_copyright()
-                )
-                break
-            case 'FBX':
-                bpy.ops.export_scene.fbx(
-                    use_selection=True,
-                    filepath=os.path.join(final_path, f"{item_name}.fbx"),
-                    check_existing=True,
-                    export_animations=exporter.animations,
-                    global_scale=exporter.scale,
-                )
-                # TODO: Finish FBX export logic
-                break
-            case 'OBJ':
-                bpy.ops.export_scene.obj(
-                    use_selection=True,
-                    filepath=os.path.join(final_path, f"{item_name}.obj"),
-                    check_existing=True,
-                    global_scale=exporter.scale,
-                )
-                # TODO: Finish OBJ export logic
-                break
+    match exporter.exporter_type:
+        case 'GLTF':
+            bpy.ops.export_scene.gltf(
+                use_selection=True,
+                filepath=os.path.join(final_path, f"{item_name}.glb"),
+                export_format='GLB' if exporter.embed_materials else 'GLTF_SEPARATE',
+                check_existing=True,
+                export_animations=exporter.animations,
+                export_jpeg_quality=70,
+                export_image_format='JPEG',
+                export_materials='EXPORT',
+                export_copyright=get_copyright()
+            )
+        case 'FBX':
+            bpy.ops.export_scene.fbx(
+                use_selection=True,
+                filepath=os.path.join(final_path, f"{item_name}.fbx"),
+                check_existing=True,
+                global_scale=exporter.scale,
+                bake_space_transform=exporter.apply_transforms,
+                embed_textures=exporter.embed_materials,
+                path_mode='COPY' if exporter.embed_materials else 'AUTO',
+                bake_anim=exporter.animations,
+            )
+        case 'OBJ':
+            bpy.ops.wm.obj_export(
+                export_selected_objects=True,
+                filepath=os.path.join(final_path, f"{item_name}.obj"),
+                check_existing=True,
+                global_scale=exporter.scale,
+                apply_modifiers=exporter.apply_transforms,
+                export_materials=exporter.embed_materials,
+            )
 
 # endregion
 

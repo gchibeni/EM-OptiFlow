@@ -36,6 +36,7 @@ from bpy.types import (
 )
 from . import auto_load
 from . import panels
+from .functions import *
 
 auto_load.init()
 
@@ -43,7 +44,8 @@ def register():
     auto_load.register()
     Scene.show_items = BoolProperty(name="Items", default=True)
     Scene.scene_items = CollectionProperty(type=panels.SceneItem)
-    Scene.scene_items_index = IntProperty(name="")
+    Scene.scene_items_index = IntProperty(name="", update=isolate_items_collection)
+    Scene.scene_items_isolate = BoolProperty(name="Isolate", default=False, update=isolate_items_collection)
     Scene.show_exporters = BoolProperty(name="Exporters", default=False)
     Scene.exporters = CollectionProperty(type=panels.ExporterItem)
     Scene.exporters_index = IntProperty(name="")
@@ -78,6 +80,7 @@ def unregister():
     del Scene.show_items
     del Scene.scene_items
     del Scene.scene_items_index
+    del Scene.scene_items_isolate
     del Scene.show_exporters
     del Scene.exporters
     del Scene.exporters_index
