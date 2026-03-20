@@ -172,15 +172,13 @@ class IMPORT_OT_popup(Operator):
                 if not scene.import_texture_folder:
                     self.report({'ERROR'}, "Texture folder is required for Object import.")
                     return {'CANCELLED'}
-                self.report({'INFO'}, f"Model: {scene.import_model}")
-                self.report({'INFO'}, f"Collider: {scene.import_collider}")
-                self.report({'INFO'}, f"Texture Folder: {scene.import_texture_folder}")
+                start_object_import(scene.import_model, scene.import_collider, scene.import_texture_folder, scene.import_texture_size)
                 return {'FINISHED'}
             case 'TILES/MATERIALS':
                 if not scene.import_texture_folder:
                     self.report({'ERROR'}, "Texture folder is required for Tiles/Materials import.")
                     return {'CANCELLED'}
-                tiles = import_tiles(scene.import_texture_folder, scene.import_texture_size)
+                start_tiles_import(scene.import_texture_folder, scene.import_texture_size)
                 return {'FINISHED'}
         return {'FINISHED'}
 

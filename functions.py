@@ -204,6 +204,7 @@ def rename_material(obj, new_name):
             bsdf = mat.node_tree.nodes.get("Principled BSDF")
             if bsdf and new_name == "ColMat":
                 bsdf.inputs["Alpha"].default_value = 0
+                mat.blend_method = 'BLEND'
         else:
             no_mat = True
     if len(obj.material_slots) == 0:
@@ -218,6 +219,7 @@ def rename_material(obj, new_name):
             bsdf.inputs["Base Color"].default_value = (0.8, 0.8, 0.8, 1)
             if new_name == "ColMat":
                 bsdf.inputs["Alpha"].default_value = 0
+                new_mat.blend_method = 'BLEND'
         # Assign to all slots
         for i in range(len(obj.material_slots)):
             obj.material_slots[i].material = new_mat
@@ -462,7 +464,7 @@ def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_ove
         import_textures(obj, texture_folder, texture_size, basecolor_override)
     return obj
 
-def import_textures(obj, texture_folder, texture_size, basecolor_override):
+def import_textures(obj, texture_folder, texture_size, basecolor_override = None):
     if not obj:
         return None
     max_size = int(texture_size)
@@ -547,10 +549,80 @@ def import_tiles(texture_folder, texture_size, subfolder="", depth=0):
             subfolder_path = entry.path
             import_tiles(subfolder_path, texture_size, subfolder_name, depth + 1)
 
-def start_object_import():
-    pass
+def import_file(filepath):
+    ext = os.path.splitext(filepath)[1].lower()
+    before = set(bpy.data.objects)
+    if ext == '.fbx':
+        bpy.ops.import_scene.fbx(filepath=filepath)
+    elif ext == '.obj':
+        bpy.ops.wm.obj_import(filepath=filepath)
+    elif ext in ('.glb', '.gltf'):
+        bpy.ops.import_scene.gltf(filepath=filepath)
+    else:
+        return []
+    return [o for o in bpy.data.objects if o not in before]
 
-def import_object():
-    pass
+def join_objects(objs, name):
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    if len(objs) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.active_object
+    obj.name = name
+    if obj.data:
+        obj.data.name = name
+    return obj
+
+def start_object_import(model_path, collider_path, texture_folder, texture_size):
+    import_object(model_path, collider_path, texture_folder, texture_size)
+    purge_unused_data()
+
+def import_object(model_path, collider_path, texture_folder, texture_size):
+    model_path = bpy.path.abspath(model_path)
+    if not os.path.isfile(model_path):
+        return
+    model_name = os.path.splitext(os.path.basename(model_path))[0]
+    # Import and merge model
+    model_objs = import_file(model_path)
+    if not model_objs:
+        return
+    mesh_obj = join_objects(model_objs, model_name)
+    # Import and merge collider (optional)
+    col_obj = None
+    if collider_path:
+        collider_path = bpy.path.abspath(collider_path)
+        if os.path.isfile(collider_path):
+            col_name = os.path.splitext(os.path.basename(collider_path))[0]
+            col_objs = import_file(collider_path)
+            if col_objs:
+                col_obj = join_objects(col_objs, col_name)
+    # Collection setup
+    collection = bpy.data.collections.get(model_name)
+    if not collection:
+        collection = bpy.data.collections.new(model_name)
+        bpy.context.scene.collection.children.link(collection)
+    for obj in [mesh_obj, col_obj]:
+        if obj:
+            for c in list(obj.users_collection):
+                c.objects.unlink(obj)
+            collection.objects.link(obj)
+    # SceneItem setup
+    item = next((i for i in bpy.context.scene.scene_items if i.collection == collection), None)
+    if not item:
+        item = bpy.context.scene.scene_items.add()
+        item.item_type = 'OBJECT'
+        item.collection = collection
+    # Materials
+    rename_material(mesh_obj, "Mat")
+    if col_obj:
+        rename_material(col_obj, "ColMat")
+    # Textures
+    if texture_folder:
+        texture_path = bpy.path.abspath(texture_folder)
+        if os.path.isdir(texture_path):
+            import_textures(mesh_obj, texture_path, texture_size)
+    return mesh_obj
 
 # endregion

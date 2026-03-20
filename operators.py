@@ -22,9 +22,122 @@ from bpy.props import (
     BoolProperty
 )
 
-# region Operators
+# region General
 
-# Scene Items
+_last_dir = ""
+
+class PROPERTIES_OT_dirpath(Operator):
+    bl_idname = "ui.select_dirpath"
+    bl_label = "Select Path"
+
+    directory: StringProperty(options={'HIDDEN'}) #type: ignore # Stores the final path
+    target_prop: StringProperty(options={'HIDDEN'})  #type: ignore # Property to set
+    data_path: StringProperty(options={'HIDDEN'})  #type: ignore # Path to resolve target object
+    filter_glob: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
+
+    def execute(self, context):
+        global _last_dir
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
+        path = bpy.path.abspath(self.directory)
+        # Show error if not a file
+        if not os.path.isdir(path):
+            self.report({'ERROR'}, "Selected path is not a valid directory")
+            return {'CANCELLED'}
+        _last_dir = path
+        # Convert to relative path if possible
+        blend_dir = os.path.dirname(bpy.data.filepath)
+        if not blend_dir:
+            setattr(target, self.target_prop, self.directory)
+            return {'FINISHED'}
+        try:
+            rel_path = bpy.path.relpath(self.directory)
+            setattr(target, self.target_prop, rel_path)
+        except Exception:
+            setattr(target, self.target_prop, self.directory)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
+        current_path = getattr(target, self.target_prop, "")
+        # Determine starting path
+        if current_path:
+            abs_path = bpy.path.abspath(current_path)
+        else:
+            abs_path = ""
+        if abs_path and os.path.exists(abs_path):
+            start_path = abs_path
+        elif _last_dir and os.path.exists(_last_dir):
+            start_path = _last_dir
+        else:
+            blend_path = bpy.data.filepath
+            blend_dir = os.path.dirname(blend_path) if blend_path else ""
+            start_path = blend_dir if blend_dir and os.path.exists(blend_dir) else os.path.expanduser("~/Documents")
+        self.directory = start_path
+        #self.filter_glob = "DIR_PATH"  # Force directory selection
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+class PROPERTIES_OT_filepath(Operator):
+    bl_idname = "ui.select_filepath"
+    bl_label = "Select File"
+
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH") #type: ignore
+    target_prop: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
+    data_path: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore # Path to resolve target object
+    file_types: bpy.props.StringProperty(default="", options={'HIDDEN'}) #type: ignore
+    filter_glob: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
+
+    def execute(self, context):
+        global _last_dir
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
+        # Resolve full path
+        path = bpy.path.abspath(self.filepath)
+        # Show error if not a file
+        if not os.path.isfile(path):
+            self.report({'ERROR'}, "Selected path is not a valid file")
+            return {'CANCELLED'}
+        _last_dir = os.path.dirname(path)
+        # Convert to relative path if possible
+        blend_dir = os.path.dirname(bpy.data.filepath)
+        if not blend_dir:
+            setattr(target, self.target_prop, self.filepath)
+            return {'FINISHED'}
+        try:
+            rel_path = bpy.path.relpath(self.filepath)
+            setattr(target, self.target_prop, rel_path)
+        except Exception:
+            setattr(target, self.target_prop, self.filepath)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
+        current_path = getattr(target, self.target_prop, "")
+        # Determine starting path
+        if current_path:
+            abs_path = bpy.path.abspath(current_path)
+            abs_path = os.path.dirname(abs_path) if os.path.isfile(abs_path) else abs_path
+        else:
+            abs_path = ""
+        if abs_path and os.path.exists(abs_path):
+            start_path = abs_path
+        elif _last_dir and os.path.exists(_last_dir):
+            start_path = _last_dir
+        else:
+            blend_path = bpy.data.filepath
+            blend_dir = os.path.dirname(blend_path) if blend_path else ""
+            start_path = blend_dir if blend_dir and os.path.exists(blend_dir) else os.path.expanduser("~/Documents")
+        self.filepath = os.path.join(start_path, "")
+        if self.file_types:
+            types = [f"*.{ext.strip()}" for ext in self.file_types.split(",")]
+            self.filter_glob = ";".join(types)
+        else:
+            self.filter_glob = ""
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+# endregion
+
+# region SceneItems
 
 class SCENEITEMS_OT_add(Operator):
     bl_idname = "sceneitems.add"
@@ -113,7 +226,9 @@ class SCENEITEMS_OT_apply_all(Operator):
         self.report({'INFO'},"Applying changes...")
         return {'FINISHED'}
 
-# Optimization
+# endregion
+
+# region Optimizations
 
 class OPTIMIZATION_OT_create(Operator):
     bl_idname = "optimization.create"
@@ -160,7 +275,9 @@ class OPTIMIZATION_OT_import(Operator):
             print(f"SKU: {item.sku}")
         return {'FINISHED'}
 
-# Exporters
+# endregion
+
+# region Exporters
 
 class EXPORTERS_OT_add(Operator):
     bl_idname = "exporters.add"
@@ -218,106 +335,5 @@ class EXPORTERS_OT_move_down(Operator):
             scene.exporters_index += 1
 
         return {'FINISHED'}
-
-class PROPERTIES_OT_dirpath(Operator):
-    bl_idname = "ui.select_dirpath"
-    bl_label = "Select Path"
-
-    directory: StringProperty(options={'HIDDEN'}) #type: ignore # Stores the final path
-    target_prop: StringProperty(options={'HIDDEN'})  #type: ignore # Property to set
-    data_path: StringProperty(options={'HIDDEN'})  #type: ignore # Path to resolve target object
-    filter_glob: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
-
-    def execute(self, context):
-        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
-        path = bpy.path.abspath(self.directory)
-        # Show error if not a file
-        if not os.path.isdir(path):
-            self.report({'ERROR'}, "Selected path is not a valid directory")
-            return {'CANCELLED'}
-        # Convert to relative path if possible
-        blend_dir = os.path.dirname(bpy.data.filepath)
-        if not blend_dir:
-            setattr(target, self.target_prop, self.directory)
-            return {'FINISHED'}
-        try:
-            rel_path = bpy.path.relpath(self.directory)
-            setattr(target, self.target_prop, rel_path)
-        except Exception:
-            setattr(target, self.target_prop, self.directory)
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
-        current_path = getattr(target, self.target_prop, "")
-        # Determine starting path
-        if current_path:
-            abs_path = bpy.path.abspath(current_path)
-        else:
-            abs_path = ""
-        if abs_path and os.path.exists(abs_path):
-            start_path = abs_path
-        else:
-            blend_path = bpy.data.filepath
-            blend_dir = os.path.dirname(blend_path) if blend_path else ""
-            start_path = blend_dir if blend_dir and os.path.exists(blend_dir) else os.path.expanduser("~/Documents")
-        self.directory = start_path
-        #self.filter_glob = "DIR_PATH"  # Force directory selection
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-class PROPERTIES_OT_filepath(Operator):
-    bl_idname = "ui.select_filepath"
-    bl_label = "Select File"
-
-    filepath: bpy.props.StringProperty(subtype="FILE_PATH") #type: ignore
-    target_prop: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
-    data_path: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore # Path to resolve target object
-    file_types: bpy.props.StringProperty(default="", options={'HIDDEN'}) #type: ignore
-    filter_glob: bpy.props.StringProperty(options={'HIDDEN'}) #type: ignore
-
-    def execute(self, context):
-        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
-        # Resolve full path
-        path = bpy.path.abspath(self.filepath)
-        # Show error if not a file
-        if not os.path.isfile(path):
-            self.report({'ERROR'}, "Selected path is not a valid file")
-            return {'CANCELLED'}
-
-        # Convert to relative path if possible
-        blend_dir = os.path.dirname(bpy.data.filepath)
-        if not blend_dir:
-            setattr(target, self.target_prop, self.filepath)
-            return {'FINISHED'}
-        try:
-            rel_path = bpy.path.relpath(self.filepath)
-            setattr(target, self.target_prop, rel_path)
-        except Exception:
-            setattr(target, self.target_prop, self.filepath)
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        target = context.scene.path_resolve(self.data_path) if self.data_path else context.scene
-        current_path = getattr(target, self.target_prop, "")
-        # Determine starting path
-        if current_path:
-            abs_path = bpy.path.abspath(current_path)
-        else:
-            abs_path = ""
-        if abs_path and os.path.exists(abs_path):
-            start_path = abs_path
-        else:
-            blend_path = bpy.data.filepath
-            blend_dir = os.path.dirname(blend_path) if blend_path else ""
-            start_path = blend_dir if blend_dir and os.path.exists(blend_dir) else os.path.expanduser("~/Documents")
-        self.filepath = os.path.join(start_path, "")
-        if self.file_types:
-            types = [f"*.{ext.strip()}" for ext in self.file_types.split(",")]
-            self.filter_glob = ";".join(types)
-        else:
-            self.filter_glob = ""
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
 
 # endregion
