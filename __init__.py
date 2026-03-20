@@ -46,6 +46,7 @@ def register():
     Scene.scene_items = CollectionProperty(type=panels.SceneItem)
     Scene.scene_items_index = IntProperty(name="", update=isolate_items_collection)
     Scene.scene_items_isolate = BoolProperty(name="Isolate", default=False, update=isolate_items_collection)
+    Scene.scene_items_quick_edit = BoolProperty(name="Quick Edit", default=False)
     Scene.show_exporters = BoolProperty(name="Exporters", default=False)
     Scene.exporters = CollectionProperty(type=panels.ExporterItem)
     Scene.exporters_index = IntProperty(name="")
@@ -74,6 +75,8 @@ def register():
         ],
         default='4096'
     ) #type: ignore
+    bpy.app.handlers.load_post.append(load_post_start_sku_input)
+    bpy.app.timers.register(start_sku_input, first_interval=0.5)
 
 def unregister():
     auto_load.unregister()
@@ -81,6 +84,7 @@ def unregister():
     del Scene.scene_items
     del Scene.scene_items_index
     del Scene.scene_items_isolate
+    del Scene.scene_items_quick_edit
     del Scene.show_exporters
     del Scene.exporters
     del Scene.exporters_index
@@ -92,4 +96,6 @@ def unregister():
     del Scene.import_texture_folder
     del Scene.import_type
     del Scene.import_texture_size
+    if load_post_start_sku_input in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(load_post_start_sku_input)
 

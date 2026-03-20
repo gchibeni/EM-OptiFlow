@@ -4,6 +4,7 @@ import os
 import math
 from bpy.types import Scene, UILayout
 from datetime import date
+from bpy.app.handlers import persistent
 
 # region Variables
 
@@ -187,7 +188,7 @@ def apply_item_changes(item):
     rename_material(mesh_obj, "Mat")
 
     if mesh_obj and item.textures_path:
-        import_textures(mesh_obj, item.textures_path, item.textures_size)
+        import_textures(mesh_obj, item.textures_path, item.textures_size, backface_culling=item.item_type == 'TILE/MATERIAL')
     #item.textures_path = ""
 
     print(f"Renamed Mesh: {mesh_obj.name if mesh_obj else 'None'}")
@@ -253,6 +254,18 @@ def isolate_items_collection(self, context):
             lc = get_layer_collection(context.view_layer.layer_collection, item.collection)
             if lc:
                 lc.hide_viewport = (item.collection != selected.collection)
+
+def start_sku_input():
+    if bpy.context and bpy.context.window_manager:
+        try:
+            bpy.ops.sceneitems.sku_input('INVOKE_DEFAULT')
+        except Exception:
+            pass
+    return None  # don't repeat
+
+@persistent
+def load_post_start_sku_input(dummy):
+    bpy.app.timers.register(start_sku_input, first_interval=0.1)
 
 # endregion
 
@@ -462,10 +475,10 @@ def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_ove
         item.subfolder = subfolder.strip()
         item.mesh_type = fbx_key.upper() if fbx_key else 'TILES'
         item.collection = collection
-        import_textures(obj, texture_folder, texture_size, basecolor_override)
+        import_textures(obj, texture_folder, texture_size, basecolor_override, backface_culling=True)
     return obj
 
-def import_textures(obj, texture_folder, texture_size, basecolor_override = None):
+def import_textures(obj, texture_folder, texture_size, basecolor_override=None, backface_culling=False):
     if not obj:
         return None
     max_size = int(texture_size)
@@ -529,6 +542,7 @@ def import_textures(obj, texture_folder, texture_size, basecolor_override = None
         links.new(norm_node.outputs['Color'], norm_map.inputs['Color'])
         links.new(norm_map.outputs['Normal'], bsdf.inputs['Normal'])
     arrange_nodes(mat.node_tree)
+    mat.use_backface_culling = backface_culling
     return obj
 
 def start_tiles_import(texture_folder, texture_size):

@@ -62,6 +62,66 @@ class EXPORTERS_UL_list(UIList):
 
 #endregion
 
+# region Operators (SKU Input)
+
+class SCENEITEMS_OT_sku_input(Operator):
+    """Persistent modal: typing while mouse is over Properties fills selected item SKU"""
+    bl_idname = "sceneitems.sku_input"
+    bl_label = "SKU Input"
+    bl_options = {'INTERNAL'}
+
+    _mouse_x: int = 0
+    _mouse_y: int = 0
+
+    def modal(self, context, event):
+        if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
+            self._mouse_x = event.mouse_x
+            self._mouse_y = event.mouse_y
+            return {'PASS_THROUGH'}
+
+        if event.value != 'PRESS':
+            return {'PASS_THROUGH'}
+
+        # Only act when mouse is over a Properties area
+        over_properties = any(
+            area.type == 'PROPERTIES' and
+            area.x <= self._mouse_x <= area.x + area.width and
+            area.y <= self._mouse_y <= area.y + area.height
+            for area in context.window.screen.areas
+        )
+        if not over_properties:
+            return {'PASS_THROUGH'}
+
+        scene = context.scene
+        if not scene.scene_items_quick_edit:
+            return {'PASS_THROUGH'}
+
+        if not scene.scene_items or scene.scene_items_index < 0:
+            return {'PASS_THROUGH'}
+
+        item = scene.scene_items[scene.scene_items_index]
+
+        if event.type == 'BACK_SPACE':
+            if item.sku:
+                item.sku = item.sku[:-1]
+                for area in context.window.screen.areas:
+                    area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.ascii and event.ascii.isprintable():
+            item.sku += event.ascii
+            for area in context.window.screen.areas:
+                area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        return {'PASS_THROUGH'}
+
+    def invoke(self, context, event):
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+# endregion
+
 # region Panels
 
 class SCENEITEMS_PT_optimization(Panel):
@@ -107,7 +167,8 @@ class SCENEITEMS_PT_optimization(Panel):
                 scene,
                 "scene_items",
                 scene,
-                "scene_items_index"
+                "scene_items_index",
+                rows=8
             )
             # Buttons
             col = row.column(align=True)
@@ -118,6 +179,9 @@ class SCENEITEMS_PT_optimization(Panel):
             col.operator("sceneitems.move_down", icon='TRIA_DOWN', text="")
             col.separator()
             col.prop(scene, "scene_items_isolate", text="", icon="HIDE_ON" if scene.scene_items_isolate else "HIDE_OFF", toggle=True)
+            col.prop(scene, "scene_items_quick_edit", text="", icon="GREASEPENCIL")
+            col.separator(factor=4.0, type="LINE")
+            #col.prop(scene, "scene_items_auto_fill", text="", icon="SPREADSHEET")
             # Active item properties
             if scene.scene_items and scene.scene_items_index >= 0:
                 item = scene.scene_items[scene.scene_items_index]
