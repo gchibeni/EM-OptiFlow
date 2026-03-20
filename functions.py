@@ -1,4 +1,6 @@
 import re
+import json
+import urllib.request
 import bpy
 import os
 import math
@@ -639,5 +641,148 @@ def import_object(model_path, collider_path, texture_folder, texture_size):
         if os.path.isdir(texture_path):
             import_textures(mesh_obj, texture_path, texture_size)
     return mesh_obj
+
+# region Auto Fill SKUs
+
+# Columns used to build the match string when parsing TSV input.
+_TSV_MATCH_COLS = ["EM Title", "EM Collection", "EM Color", "Finish", "Shape", "Type", "Vendor Title"]
+
+def _normalize_for_match(s):
+    """Lowercase and collapse separators to spaces for fuzzy comparison."""
+    return re.sub(r'[._\-\s]+', ' ', s.lower()).strip()
+
+def _parse_tsv(text_content):
+    """Parse tab-separated content with a header row.
+    Returns (headers, rows) where rows is a list of dicts, or None if not TSV.
+    """
+    lines = [l for l in text_content.splitlines() if l.strip()]
+    if not lines or '\t' not in lines[0]:
+        return None
+    headers = [h.strip() for h in lines[0].split('\t')]
+    rows = []
+    for line in lines[1:]:
+        cells = [c.strip() for c in line.split('\t')]
+        rows.append(dict(zip(headers, cells)))
+    return headers, rows
+
+def _auto_fill_fuzzy(lines, collection_names, text_content=None):
+    """Match collection names to SKUs using token overlap scoring."""
+    parsed = []  # [(sku, frozenset_of_tokens)]
+
+    tsv = _parse_tsv(text_content) if text_content else None
+    if tsv:
+        headers, rows = tsv
+        sku_col = next((h for h in headers if h.upper() == "SKU"), None)
+        if sku_col:
+            for row in rows:
+                sku = row.get(sku_col, "").strip()
+                if not sku:
+                    continue
+                parts = [row.get(c, "") for c in _TSV_MATCH_COLS if row.get(c, "").strip()]
+                match_str = " ".join(parts)
+                if match_str.strip():
+                    parsed.append((sku, frozenset(_normalize_for_match(match_str).split())))
+    else:
+        for line in lines:
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
+
+    if not parsed:
+        return {}
+
+    results = {}
+    for col in collection_names:
+        query = frozenset(_normalize_for_match(col).split())
+        if not query:
+            continue
+        best_sku, best_score = None, 0.0
+        for sku, tokens in parsed:
+            score = len(query & tokens) / len(query)
+            if score > best_score:
+                best_score, best_sku = score, sku
+        if best_score >= 0.3 and best_sku:
+            results[col] = best_sku
+    return results
+
+def ollama_running():
+    """Return True if Ollama is reachable at localhost:11434."""
+    try:
+        urllib.request.urlopen("http://localhost:11434", timeout=0.3)
+        return True
+    except Exception:
+        return False
+
+def _auto_fill_ollama(text_content, collection_names, model):
+    tsv = _parse_tsv(text_content)
+    if tsv:
+        headers, rows = tsv
+        sku_col = next((h for h in headers if h.upper() == "SKU"), None)
+        if sku_col:
+            match_cols = [c for c in _TSV_MATCH_COLS if c in headers]
+            condensed_lines = []
+            for row in rows:
+                sku = row.get(sku_col, "").strip()
+                if not sku:
+                    continue
+                parts = [row.get(c, "").strip() for c in match_cols if row.get(c, "").strip()]
+                condensed_lines.append(f"{sku}\t{' | '.join(parts)}")
+            sku_list_text = "\n".join(condensed_lines)
+            list_description = (
+                "a condensed SKU list in the format: SKU<TAB>EM Title | EM Collection | EM Color | Finish | Vendor Title"
+            )
+        else:
+            sku_list_text = text_content
+            list_description = "tab-separated data (no SKU column found — use your best judgment)"
+    else:
+        sku_list_text = text_content
+        list_description = "a list where each line starts with the SKU followed by the name"
+
+    prompt = (
+        "You are a SKU matching assistant. You are given a list of Blender collection names and "
+        + list_description + ". Match each collection name to the most appropriate SKU. "
+        "Collection names may use abbreviations, dots, or dashes — match by semantic similarity, not just exact text.\n\n"
+        "Collection names:\n" + "\n".join(collection_names) + "\n\n"
+        f"SKU list:\n{sku_list_text}\n\n"
+        "Return ONLY a JSON object mapping each collection name to its SKU. "
+        "Example: {\"CollectionName\": \"12345\"}. No explanations, only JSON."
+    )
+    payload = json.dumps({
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {"temperature": 0.1},
+    }).encode()
+    req = urllib.request.Request(
+        "http://localhost:11434/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        result = json.loads(resp.read())
+    response_text = result.get("response", "")
+    match = re.search(r'\{.*\}', response_text, re.DOTALL)
+    if match:
+        return json.loads(match.group())
+    return {}
+
+def auto_fill_skus(text_content, collection_names, model="qwen2.5:1.5b"):
+    """Match collection names to SKUs from text_content.
+    Returns dict {collection_name: sku}.
+    Tries Ollama first, falls back to fuzzy matching on error.
+    """
+    lines = [l.strip() for l in text_content.splitlines() if l.strip()]
+    if not lines or not collection_names:
+        return {}
+
+    try:
+        return _auto_fill_ollama(text_content, collection_names, model)
+    except Exception as e:
+        print(f"[OptiFlow] Ollama error ({e}) — falling back to fuzzy matching.")
+
+    return _auto_fill_fuzzy(lines, collection_names, text_content)
+
+# endregion
 
 # endregion

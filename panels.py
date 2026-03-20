@@ -12,13 +12,11 @@ from bpy.types import (
     UIList
 )
 from bpy.props import (
-    StringProperty,
     EnumProperty,
     CollectionProperty,
     PointerProperty,
     IntProperty,
     FloatProperty,
-    BoolProperty
 )
 
 # region Lists
@@ -62,66 +60,6 @@ class EXPORTERS_UL_list(UIList):
 
 #endregion
 
-# region Operators (SKU Input)
-
-class SCENEITEMS_OT_sku_input(Operator):
-    """Persistent modal: typing while mouse is over Properties fills selected item SKU"""
-    bl_idname = "sceneitems.sku_input"
-    bl_label = "SKU Input"
-    bl_options = {'INTERNAL'}
-
-    _mouse_x: int = 0
-    _mouse_y: int = 0
-
-    def modal(self, context, event):
-        if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
-            self._mouse_x = event.mouse_x
-            self._mouse_y = event.mouse_y
-            return {'PASS_THROUGH'}
-
-        if event.value != 'PRESS':
-            return {'PASS_THROUGH'}
-
-        # Only act when mouse is over a Properties area
-        over_properties = any(
-            area.type == 'PROPERTIES' and
-            area.x <= self._mouse_x <= area.x + area.width and
-            area.y <= self._mouse_y <= area.y + area.height
-            for area in context.window.screen.areas
-        )
-        if not over_properties:
-            return {'PASS_THROUGH'}
-
-        scene = context.scene
-        if not scene.scene_items_quick_edit:
-            return {'PASS_THROUGH'}
-
-        if not scene.scene_items or scene.scene_items_index < 0:
-            return {'PASS_THROUGH'}
-
-        item = scene.scene_items[scene.scene_items_index]
-
-        if event.type == 'BACK_SPACE':
-            if item.sku:
-                item.sku = item.sku[:-1]
-                for area in context.window.screen.areas:
-                    area.tag_redraw()
-            return {'RUNNING_MODAL'}
-
-        if event.ascii and event.ascii.isprintable():
-            item.sku += event.ascii
-            for area in context.window.screen.areas:
-                area.tag_redraw()
-            return {'RUNNING_MODAL'}
-
-        return {'PASS_THROUGH'}
-
-    def invoke(self, context, event):
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-# endregion
-
 # region Panels
 
 class SCENEITEMS_PT_optimization(Panel):
@@ -134,15 +72,10 @@ class SCENEITEMS_PT_optimization(Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        layout.operator("optimization.create", icon='MOD_REMESH')
-        layout.operator("optimization.import", icon='IMPORT')
-        layout.operator("optimization.export", icon='EXPORT')
-        col = layout.column(align=True)
-        split = col.split(factor=0.3)
-        split.label(text="Initialism Code:")
-        row = split.row(align=True)
-        row.prop(scene, "code", text="")
-
+        row = layout.row()
+        row.operator("optimization.create", icon='MOD_REMESH')
+        row.operator("optimization.import", icon='IMPORT')
+        row.operator("optimization.export", icon='EXPORT')
         layout.separator(type='LINE')
         self.build_items_section(layout, scene)
         #self.build_exporters_section(layout, scene)
@@ -158,7 +91,6 @@ class SCENEITEMS_PT_optimization(Panel):
         )
         row.label(text="Items")
         if scene.show_items:
-            row = layout.row()
             row = layout.row()
             # List
             row.template_list(
@@ -181,12 +113,14 @@ class SCENEITEMS_PT_optimization(Panel):
             col.prop(scene, "scene_items_isolate", text="", icon="HIDE_ON" if scene.scene_items_isolate else "HIDE_OFF", toggle=True)
             col.prop(scene, "scene_items_quick_edit", text="", icon="GREASEPENCIL")
             col.separator(factor=4.0, type="LINE")
-            #col.prop(scene, "scene_items_auto_fill", text="", icon="SPREADSHEET")
+            col.operator("sceneitems.auto_fill", text="", icon="SPREADSHEET")
             # Active item properties
             if scene.scene_items and scene.scene_items_index >= 0:
                 item = scene.scene_items[scene.scene_items_index]
                 box = layout.box()
-                box.prop(item, "item_type")
+                row = box.row()
+                row.prop(item, "item_type")
+                row.prop(scene, "code", text="Code", placeholder="EM")
                 box.separator(type="LINE")
                 box.prop(item, "collection")
                 box.prop(item, "sku")
@@ -204,6 +138,7 @@ class SCENEITEMS_PT_optimization(Panel):
                 row = layout.row()
                 row.operator("sceneitems.apply_all")
                 row.enabled = any(i.collection and i.sku for i in scene.scene_items)
+        layout.separator(type='LINE')
 
 # endregion
 
@@ -218,6 +153,7 @@ class IMPORT_OT_popup(Operator):
         layout = self.layout
         scene = context.scene
         layout.prop(scene, "import_type")
+        layout.separator(type='LINE')
         if scene.import_type == 'OBJECT':
             file_input(layout, scene, "Model:", "import_model", "fbx,obj,glb,gltf")
             file_input(layout, scene, "Collider:", "import_collider", "fbx,obj,glb,gltf")
@@ -225,6 +161,7 @@ class IMPORT_OT_popup(Operator):
         elif scene.import_type == 'TILES/MATERIALS':
             dir_input(layout, scene, "Texture Folder:", "import_texture_folder")
             layout.prop(scene, "import_texture_size")
+        layout.separator(type='LINE')
 
     def execute(self, context):
         scene = context.scene
@@ -262,11 +199,8 @@ class EXPORT_OT_popup(Operator):
         layout = self.layout
         scene = context.scene
         dir_input(layout, scene, "Export Path:", "export_path")
-        # Copyright input
-        col = layout.column(align=True)
-        split = col.split(factor=0.3)
-        split.label(text="Copyright:")
-        split.prop(scene, "copyright_text", text="")
+        layout.prop(scene, "copyright_text")
+        layout.separator(type='LINE')
         row = layout.row()
         # List
         row.template_list(
@@ -309,13 +243,19 @@ class EXPORT_OT_popup(Operator):
                 set_box.prop(exporter, "embed_materials")
                 if exporter.exporter_type != 'OBJ':
                     set_box.prop(exporter, "animations")
+        layout.separator(type='LINE')
 
     def execute(self, context):
         scene = context.scene
         self.report({'INFO'}, f"Exporting ...")
+        was_isolated = scene.scene_items_isolate
+        if was_isolated:
+            scene.scene_items_isolate = False
         for exporter in scene.exporters:
             for item in scene.scene_items:
                 export_item(item, exporter)
+        if was_isolated:
+            scene.scene_items_isolate = True
         return {'FINISHED'}
 
     def invoke(self, context, event):

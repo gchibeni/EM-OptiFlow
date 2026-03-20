@@ -337,3 +337,191 @@ class EXPORTERS_OT_move_down(Operator):
         return {'FINISHED'}
 
 # endregion
+
+# region Auto-fill
+
+_AUTO_FILL_TEXT = "auto-fill-text"
+
+class SCENEITEMS_OT_sku_input(Operator):
+    """Persistent modal: typing while mouse is over Properties fills selected item SKU"""
+    bl_idname = "sceneitems.sku_input"
+    bl_label = "SKU Input"
+    bl_options = {'INTERNAL'}
+
+    _mouse_x: int = 0
+    _mouse_y: int = 0
+
+    def modal(self, context, event):
+        if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
+            self._mouse_x = event.mouse_x
+            self._mouse_y = event.mouse_y
+            return {'PASS_THROUGH'}
+
+        if event.value != 'PRESS':
+            return {'PASS_THROUGH'}
+
+        # Only act when mouse is over a Properties area
+        over_properties = any(
+            area.type == 'PROPERTIES' and
+            area.x <= self._mouse_x <= area.x + area.width and
+            area.y <= self._mouse_y <= area.y + area.height
+            for area in context.window.screen.areas
+        )
+
+        if not over_properties:
+            return {'PASS_THROUGH'}
+
+        scene = context.scene
+        if not scene.scene_items_quick_edit:
+            return {'PASS_THROUGH'}
+
+        if not scene.scene_items or scene.scene_items_index < 0:
+            return {'PASS_THROUGH'}
+
+        item = scene.scene_items[scene.scene_items_index]
+
+        if event.type == 'BACK_SPACE':
+            if item.sku:
+                item.sku = item.sku[:-1]
+                for area in context.window.screen.areas:
+                    area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'DEL':
+            if event.ctrl:
+                for i in scene.scene_items:
+                    i.sku = ""
+            else:
+                item.sku = ""
+            for area in context.window.screen.areas:
+                area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.ascii and event.ascii.isprintable():
+            item.sku += event.ascii
+            for area in context.window.screen.areas:
+                area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        return {'PASS_THROUGH'}
+
+    def invoke(self, context, event):
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+class SCENEITEMS_OT_open_text_editor(Operator):
+    """Open the auto-fill text block in a new floating Text Editor window"""
+    bl_idname = "sceneitems.open_text_editor"
+    bl_label = "Open in Text Editor"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        text = SCENEITEMS_OT_auto_fill._get_text()
+        existing = set(context.window_manager.windows[:])
+        bpy.ops.wm.window_new()
+        new_wins = [w for w in context.window_manager.windows if w not in existing]
+        if not new_wins:
+            self.report({'WARNING'}, "Could not open new window.")
+            return {'CANCELLED'}
+        area = new_wins[0].screen.areas[0]
+        area.type = 'TEXT_EDITOR'
+        area.spaces[0].text = text
+        return {'FINISHED'}
+
+class SCENEITEMS_OT_get_ollama(Operator):
+    """Open the Ollama download page in your browser"""
+    bl_idname = "sceneitems.get_ollama"
+    bl_label = "Get Ollama"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        import webbrowser
+        webbrowser.open("https://ollama.com/download")
+        return {'FINISHED'}
+
+class SCENEITEMS_OT_auto_fill(Operator):
+    """Auto-fill SKUs by matching collection names against a pasted SKU list"""
+    bl_idname = "sceneitems.auto_fill"
+    bl_label = "Auto Fill SKUs"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    model_name: EnumProperty(
+        name="Model",
+        items=[
+            ("qwen2.5:1.5b",  "Qwen 2.5 1.5B (fast)",   ""),
+            ("qwen2.5:3b",    "Qwen 2.5 3B",             ""),
+            ("qwen2.5:7b",    "Qwen 2.5 7B (accurate)",  ""),
+            ("llama3.2:1b",   "Llama 3.2 1B (fast)",     ""),
+            ("llama3.2:3b",   "Llama 3.2 3B",            ""),
+            ("mistral:7b",    "Mistral 7B",               ""),
+        ],
+        default="qwen2.5:1.5b",
+    )  # type: ignore
+    _ollama_running: bool = False
+
+    @staticmethod
+    def _get_text():
+        text = bpy.data.texts.get(_AUTO_FILL_TEXT)
+        if not text:
+            text = bpy.data.texts.new(_AUTO_FILL_TEXT)
+        return text
+
+    def draw(self, context):
+        layout = self.layout
+        text = self._get_text()
+
+        if self._ollama_running:
+            layout.prop(self, "model_name")
+        else:
+            row = layout.row(align=True)
+            row.label(text="Ollama not running", icon='ERROR')
+            layout.operator("sceneitems.get_ollama", text="Download Ollama", icon='URL')
+            layout.label(text="Install Ollama, then run: ollama pull qwen2.5:1.5b", icon='INFO')
+        layout.separator(type="LINE")
+        layout.operator("sceneitems.open_text_editor", icon='TEXT')
+
+        line_count = len(text.lines)
+        has_content = text.as_string().strip()
+        if has_content:
+            layout.label(text=f"{line_count} line(s) loaded.", icon='CHECKMARK')
+        else:
+            layout.label(text="No list loaded yet. Open the Text Editor to paste.", icon='INFO')
+
+        layout.separator(type="LINE")
+
+    def execute(self, context):
+        scene = context.scene
+        text = bpy.data.texts.get(_AUTO_FILL_TEXT)
+        if not text or not text.as_string().strip():
+            self.report({'ERROR'}, "The SKU list is empty.")
+            return {'CANCELLED'}
+
+        unmatched = [i for i in scene.scene_items if i.collection and not i.sku]
+        if not unmatched:
+            self.report({'INFO'}, "All items already have SKUs.")
+            return {'CANCELLED'}
+
+        collection_names = [i.collection.name for i in unmatched]
+        results = auto_fill_skus(text.as_string(), collection_names, self.model_name)
+
+        if not results:
+            self.report({'WARNING'}, "No matches found. Paste a tab-separated spreadsheet with a SKU column, or a plain list with SKU first on each line.")
+            return {'CANCELLED'}
+
+        count = 0
+        for item in unmatched:
+            if item.collection.name in results:
+                sku = results[item.collection.name]
+                if 'offset' in item.subfolder.lower():
+                    sku += '.OFFSET'
+                item.sku = sku
+                count += 1
+        self.report({'INFO'}, f"Filled {count} / {len(unmatched)} SKUs.")
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        self._get_text()
+        self._ollama_running = ollama_running()
+        return context.window_manager.invoke_props_dialog(self, width=400, confirm_text="Auto Fill")
+
+# endregion
