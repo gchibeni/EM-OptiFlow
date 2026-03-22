@@ -36,6 +36,7 @@ from bpy.types import (
 )
 from . import auto_load
 from . import panels
+from . import operators
 from .functions import *
 
 auto_load.init()
@@ -64,6 +65,9 @@ def register():
         ],
         default='OBJECT'
     ) #type: ignore
+    Scene.auto_fill_file_path = StringProperty(name="File")
+    Scene.auto_fill_spreadsheet_url = StringProperty(name="Spreadsheet URL or ID", update=operators._on_spreadsheet_url_change)
+    Scene.auto_fill_sheet_tab = StringProperty(name="Sheet Tab")
     Scene.import_texture_size = EnumProperty(
         name="Texture Size",
         items=[
@@ -94,6 +98,9 @@ def unregister():
     del Scene.import_model
     del Scene.import_collider
     del Scene.import_texture_folder
+    del Scene.auto_fill_file_path
+    del Scene.auto_fill_spreadsheet_url
+    del Scene.auto_fill_sheet_tab
     del Scene.import_type
     del Scene.import_texture_size
     if load_post_start_sku_input in bpy.app.handlers.load_post:

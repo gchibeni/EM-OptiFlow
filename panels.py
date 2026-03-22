@@ -25,6 +25,7 @@ class SCENEITEMS_UL_list(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         scene = context.scene
         row = layout.row(align=True)
+        uncertain = "?" in item.sku
         if item.sku == "" or not item.collection:
             row.alert = True
         # Left padding
@@ -32,9 +33,9 @@ class SCENEITEMS_UL_list(UIList):
         # Type icon
         match item.item_type:
             case 'OBJECT':
-                row.label(icon='MATSHADERBALL')
+                row.label(icon='STRIP_COLOR_01' if uncertain else 'MATSHADERBALL')
             case 'TILE/MATERIAL':
-                row.label(icon='MESH_GRID')
+                row.label(icon='STRIP_COLOR_01' if uncertain else 'MESH_GRID')
         sku_text = "SKU: " + (item.sku if item.sku else "-")
         row.label(text=sku_text)
         layout.prop(item, "item_type", text="", emboss=False)
@@ -125,9 +126,9 @@ class SCENEITEMS_PT_optimization(Panel):
                 box.prop(item, "collection")
                 box.prop(item, "sku")
                 box.prop(item, "subfolder")
-                box.separator(type="LINE")
                 dir_input(box, item, "Textures:", "textures_path")
-                box.prop(item, "textures_size")
+                if item.textures_path != "":
+                    box.prop(item, "textures_size")
                 if item.item_type == 'TILE/MATERIAL':
                     box.prop(item, "mesh_type")
                 box.separator(type="LINE")

@@ -1,6 +1,12 @@
 import re
 import json
 import urllib.request
+import urllib.parse
+import socket
+import threading
+import http.server
+import webbrowser
+import time
 import bpy
 import os
 import math
@@ -10,6 +16,7 @@ from bpy.app.handlers import persistent
 
 # region Variables
 
+remove_names =  ["basecolor", "albedo", "diffuse", "base_color", "color", "offset", "uniform", "chiseled", "matte", "grip", "polished"]
 basecolor_names = ["basecolor", "albedo", "diffuse", "base_color", "color"]
 roughness_names = ["roughness", "rough", "rmap"]
 reflect_names = ["reflect", "reflective", "reflection", "specular"]
@@ -440,7 +447,7 @@ def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_ove
     folder_name = os.path.basename(texture_folder) if subfolder == "" else subfolder
     folder_lower = folder_name.lower()
     basecolor_path = find_texture(texture_folder, basecolor_names) if not basecolor_override else basecolor_override
-    name = clean_name(os.path.splitext(os.path.basename(basecolor_path))[0], basecolor_names)
+    name = clean_name(os.path.splitext(os.path.basename(basecolor_path))[0], remove_names) + " " + subfolder
     fbx_key = next((k for k in fbx_map if k.lower() in folder_lower), None)
     if fbx_key:
         name = name + "_" + fbx_key.lower()
@@ -642,14 +649,32 @@ def import_object(model_path, collider_path, texture_folder, texture_size):
             import_textures(mesh_obj, texture_path, texture_size)
     return mesh_obj
 
-# region Auto Fill SKUs
+# endregion
 
-# Columns used to build the match string when parsing TSV input.
-_TSV_MATCH_COLS = ["EM Title", "EM Collection", "EM Color", "Finish", "Shape", "Type", "Vendor Title"]
+# region Auto Fill
 
 def _normalize_for_match(s):
     """Lowercase and collapse separators to spaces for fuzzy comparison."""
     return re.sub(r'[._\-\s]+', ' ', s.lower()).strip()
+
+# Tokens that are too generic to be meaningful match signals (dimensions, pure numbers, etc.)
+_NOISE_TOKEN_RE = re.compile(r'^\d+x\d+$|^\d+(\.\d+)?$')
+
+# Finish/surface treatment terms used as a dedicated tiebreaker
+_FINISH_TERMS = frozenset({
+    'matte', 'polished', 'honed', 'glazed', 'grip', 'lappato',
+    'satin', 'chiseled', 'chisseled', 'hammered', 'brushed',
+    'natural', 'silk', 'offset', 'structured', 'textured',
+    'glossy'
+})
+
+def _meaningful_tokens(token_set):
+    """Remove noise tokens; fall back to full set only if everything is noise."""
+    filtered = frozenset(t for t in token_set if not _NOISE_TOKEN_RE.match(t))
+    return filtered if filtered else token_set
+
+def _finish_tokens(token_set):
+    return frozenset(t for t in token_set if t in _FINISH_TERMS)
 
 def _parse_tsv(text_content):
     """Parse tab-separated content with a header row.
@@ -665,124 +690,313 @@ def _parse_tsv(text_content):
         rows.append(dict(zip(headers, cells)))
     return headers, rows
 
-def _auto_fill_fuzzy(lines, collection_names, text_content=None):
-    """Match collection names to SKUs using token overlap scoring."""
+def _find_sku_column(headers, rows):
+    """Return the most likely SKU column name, or None."""
+    # 1. Exact or partial name match
+    for h in headers:
+        if 'sku' in h.lower():
+            return h
+    # 2. Heuristic: column whose values look like product codes (digits + separators)
+    for h in headers:
+        sample = [row.get(h, '').strip() for row in rows[:20] if row.get(h, '').strip()]
+        if len(sample) >= 3 and sum(1 for v in sample if re.match(r'^\d[\d.\-/]+$', v)) >= len(sample) * 0.5:
+            return h
+    return None
+
+_FUZZY_MIN_SCORE = 0.3   # below this: no match
+_FUZZY_CONFIDENT = 0.6   # below this: append "?" to signal uncertainty
+
+
+def _auto_fill_fuzzy(lines, collection_queries, text_content=None):
+    """Match collection names to SKUs using token overlap scoring.
+
+    collection_queries: {collection_name: query_string}
+      The query string can include extra context (e.g. subfolder) beyond the collection name.
+
+    - Confident match (score >= 0.6): returns the SKU as-is.
+    - Uncertain match (0.3 <= score < 0.6): appends "?" to the SKU.
+    """
     parsed = []  # [(sku, frozenset_of_tokens)]
+
+    def _is_discontinued(values):
+        return any('discontinued' in v.lower() for v in values if v)
 
     tsv = _parse_tsv(text_content) if text_content else None
     if tsv:
         headers, rows = tsv
-        sku_col = next((h for h in headers if h.upper() == "SKU"), None)
+        sku_col = _find_sku_column(headers, rows)
         if sku_col:
+            match_cols = [h for h in headers if h != sku_col]
             for row in rows:
+                if _is_discontinued(row.values()):
+                    continue
                 sku = row.get(sku_col, "").strip()
                 if not sku:
                     continue
-                parts = [row.get(c, "") for c in _TSV_MATCH_COLS if row.get(c, "").strip()]
+                parts = [row.get(c, "").strip() for c in match_cols if row.get(c, "").strip()]
                 match_str = " ".join(parts)
                 if match_str.strip():
                     parsed.append((sku, frozenset(_normalize_for_match(match_str).split())))
+        else:
+            # No SKU column found — try every token on each line as a potential SKU
+            for line in lines[1:]:  # skip header
+                if _is_discontinued([line]):
+                    continue
+                tokens = line.split()
+                for i, tok in enumerate(tokens):
+                    if re.match(r'^\d[\d.\-/]+$', tok):
+                        rest = " ".join(tokens[:i] + tokens[i+1:])
+                        parsed.append((tok, frozenset(_normalize_for_match(rest).split())))
+                        break
+                else:
+                    # Fallback: first token is SKU
+                    parts = line.split(None, 1)
+                    if len(parts) == 2:
+                        parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
     else:
         for line in lines:
-            parts = line.split(None, 1)
-            if len(parts) == 2:
-                parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
+            if _is_discontinued([line]):
+                continue
+            tokens = line.split()
+            for i, tok in enumerate(tokens):
+                if re.match(r'^\d[\d.\-/]+$', tok):
+                    rest = " ".join(tokens[:i] + tokens[i+1:])
+                    parsed.append((tok, frozenset(_normalize_for_match(rest).split())))
+                    break
+            else:
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
 
     if not parsed:
         return {}
 
     results = {}
-    for col in collection_names:
-        query = frozenset(_normalize_for_match(col).split())
+    for col_name, query_str in collection_queries.items():
+        query = frozenset(_normalize_for_match(query_str).split())
         if not query:
             continue
-        best_sku, best_score = None, 0.0
+
+        query_main = _meaningful_tokens(query)
+        query_dim = query - query_main
+        query_finish = _finish_tokens(query_main)
+
+        scored = []
         for sku, tokens in parsed:
-            score = len(query & tokens) / len(query)
-            if score > best_score:
-                best_score, best_sku = score, sku
-        if best_score >= 0.3 and best_sku:
-            results[col] = best_sku
+            cand_main = _meaningful_tokens(tokens)
+            cand_dim = tokens - cand_main
+            cand_finish = _finish_tokens(cand_main)
+            main_score = len(query_main & cand_main) / len(query_main) if query_main else 0.0
+            # Dimension tiebreaker: penalise mismatched sizes
+            dim_score = len(query_dim & cand_dim) / len(query_dim) if query_dim and cand_dim else 1.0
+            # Finish tiebreaker: reward matching finish terms, penalise extra ones in candidate
+            finish_score = len(query_finish & cand_finish) - len(cand_finish - query_finish)
+            scored.append((sku, main_score, dim_score, finish_score))
+
+        best_main = max(m for _, m, _, _ in scored)
+        if best_main < _FUZZY_MIN_SCORE:
+            continue
+
+        best_sku, best_main_s, _, _ = max(scored, key=lambda x: (x[1], x[2], x[3]))
+        result = best_sku if best_main_s >= _FUZZY_CONFIDENT else best_sku + "?"
+        results[col_name] = result
     return results
 
-def ollama_running():
-    """Return True if Ollama is reachable at localhost:11434."""
-    try:
-        urllib.request.urlopen("http://localhost:11434", timeout=0.3)
-        return True
-    except Exception:
-        return False
+def auto_fill_skus(text_content, collection_queries):
+    """Match collection names to SKUs from text_content using fuzzy matching.
 
-def _auto_fill_ollama(text_content, collection_names, model):
-    tsv = _parse_tsv(text_content)
-    if tsv:
-        headers, rows = tsv
-        sku_col = next((h for h in headers if h.upper() == "SKU"), None)
-        if sku_col:
-            match_cols = [c for c in _TSV_MATCH_COLS if c in headers]
-            condensed_lines = []
-            for row in rows:
-                sku = row.get(sku_col, "").strip()
-                if not sku:
-                    continue
-                parts = [row.get(c, "").strip() for c in match_cols if row.get(c, "").strip()]
-                condensed_lines.append(f"{sku}\t{' | '.join(parts)}")
-            sku_list_text = "\n".join(condensed_lines)
-            list_description = (
-                "a condensed SKU list in the format: SKU<TAB>EM Title | EM Collection | EM Color | Finish | Vendor Title"
-            )
-        else:
-            sku_list_text = text_content
-            list_description = "tab-separated data (no SKU column found — use your best judgment)"
-    else:
-        sku_list_text = text_content
-        list_description = "a list where each line starts with the SKU followed by the name"
+    collection_queries: {collection_name: query_string}
+      Pass extra context in the query string (e.g. append subfolder) to improve matching.
 
-    prompt = (
-        "You are a SKU matching assistant. You are given a list of Blender collection names and "
-        + list_description + ". Match each collection name to the most appropriate SKU. "
-        "Collection names may use abbreviations, dots, or dashes — match by semantic similarity, not just exact text.\n\n"
-        "Collection names:\n" + "\n".join(collection_names) + "\n\n"
-        f"SKU list:\n{sku_list_text}\n\n"
-        "Return ONLY a JSON object mapping each collection name to its SKU. "
-        "Example: {\"CollectionName\": \"12345\"}. No explanations, only JSON."
-    )
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.1},
-    }).encode()
-    req = urllib.request.Request(
-        "http://localhost:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        result = json.loads(resp.read())
-    response_text = result.get("response", "")
-    match = re.search(r'\{.*\}', response_text, re.DOTALL)
-    if match:
-        return json.loads(match.group())
-    return {}
-
-def auto_fill_skus(text_content, collection_names, model="qwen2.5:1.5b"):
-    """Match collection names to SKUs from text_content.
     Returns dict {collection_name: sku}.
-    Tries Ollama first, falls back to fuzzy matching on error.
     """
     lines = [l.strip() for l in text_content.splitlines() if l.strip()]
-    if not lines or not collection_names:
+    if not lines or not collection_queries:
         return {}
-
-    try:
-        return _auto_fill_ollama(text_content, collection_names, model)
-    except Exception as e:
-        print(f"[OptiFlow] Ollama error ({e}) — falling back to fuzzy matching.")
-
-    return _auto_fill_fuzzy(lines, collection_names, text_content)
+    return _auto_fill_fuzzy(lines, collection_queries, text_content)
 
 # endregion
+
+# region Google Sheets
+
+def _google_addon_dir():
+    return os.path.dirname(os.path.realpath(__file__))
+
+def google_load_credentials():
+    path = os.path.join(_google_addon_dir(), "credentials.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        data = json.load(f)
+    return data.get("installed") or data.get("web")
+
+def google_load_token():
+    path = os.path.join(_google_addon_dir(), "token.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def google_save_token(token):
+    with open(os.path.join(_google_addon_dir(), "token.json"), 'w') as f:
+        json.dump(token, f)
+
+def google_clear_token():
+    path = os.path.join(_google_addon_dir(), "token.json")
+    if os.path.exists(path):
+        os.remove(path)
+
+def google_is_authenticated():
+    return google_load_token() is not None
+
+def _google_refresh(token):
+    creds = google_load_credentials()
+    payload = urllib.parse.urlencode({
+        'client_id': creds['client_id'],
+        'client_secret': creds['client_secret'],
+        'refresh_token': token['refresh_token'],
+        'grant_type': 'refresh_token',
+    }).encode()
+    req = urllib.request.Request(
+        creds['token_uri'],
+        data=payload,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        new_data = json.loads(resp.read())
+    token['access_token'] = new_data['access_token']
+    if 'refresh_token' in new_data:
+        token['refresh_token'] = new_data['refresh_token']
+    token['expires_at'] = time.time() + new_data.get('expires_in', 3600)
+    google_save_token(token)
+    return token
+
+def google_get_valid_token():
+    """Return a valid token dict, refreshing if expired. None if not authenticated."""
+    token = google_load_token()
+    if not token:
+        return None
+    if time.time() >= token.get('expires_at', 0) - 60:
+        try:
+            token = _google_refresh(token)
+        except Exception as e:
+            print(f"[OptiFlow] Token refresh failed: {e}")
+            return None
+    return token
+
+def _find_free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+def google_start_auth_flow():
+    """Open browser for OAuth2. Returns (auth_event, result_dict).
+    auth_event is set when the callback is received.
+    result_dict has 'code', 'error', and 'port' keys."""
+    creds = google_load_credentials()
+    if not creds:
+        raise ValueError("credentials.json not found or invalid")
+
+    port = _find_free_port()
+    redirect_uri = f"http://localhost:{port}"
+    auth_event = threading.Event()
+    result = {'code': None, 'error': None, 'port': port}
+
+    _auth_html_path = os.path.join(_google_addon_dir(), "auth.html")
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if 'code' in qs:
+                result['code'] = qs['code'][0]
+                success = True
+            else:
+                result['error'] = qs.get('error', ['unknown'])[0]
+                success = False
+            try:
+                with open(_auth_html_path, 'rb') as f:
+                    html = f.read()
+                # Inject success flag before </head>
+                flag = b'true' if success else b'false'
+                html = html.replace(b'</head>', b'<script>var AUTH_SUCCESS=' + flag + b';</script></head>', 1)
+                body = html
+            except Exception:
+                body = b'<h1>Done. You can close this tab.</h1>'
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            auth_event.set()
+
+        def log_message(self, *a):
+            pass
+
+    def _serve():
+        srv = http.server.HTTPServer(('localhost', port), _Handler)
+        srv.handle_request()  # block until one request, then exit
+
+    threading.Thread(target=_serve, daemon=True).start()
+
+    params = urllib.parse.urlencode({
+        'client_id': creds['client_id'],
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'scope': 'https://www.googleapis.com/auth/spreadsheets.readonly',
+        'access_type': 'offline',
+        'prompt': 'consent',
+    })
+    webbrowser.open(f"{creds['auth_uri']}?{params}")
+    return auth_event, result
+
+def google_exchange_code(code, port):
+    """Exchange auth code for tokens and save to disk."""
+    creds = google_load_credentials()
+    payload = urllib.parse.urlencode({
+        'code': code,
+        'client_id': creds['client_id'],
+        'client_secret': creds['client_secret'],
+        'redirect_uri': f"http://localhost:{port}",
+        'grant_type': 'authorization_code',
+    }).encode()
+    req = urllib.request.Request(
+        creds['token_uri'],
+        data=payload,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        token = json.loads(resp.read())
+    token['expires_at'] = time.time() + token.get('expires_in', 3600)
+    google_save_token(token)
+    return token
+
+def _google_api_get(access_token, url):
+    req = urllib.request.Request(url, headers={'Authorization': f'Bearer {access_token}'})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read())
+
+def google_parse_spreadsheet_id(url_or_id):
+    """Extract spreadsheet ID from a URL or return the value as-is if it looks like an ID."""
+    # Handle full URLs: .../spreadsheets/d/SPREADSHEET_ID/...
+    match = re.search(r'/spreadsheets/d/([a-zA-Z0-9_-]+)', url_or_id)
+    if match:
+        return match.group(1)
+    # Assume it's already a bare ID
+    return url_or_id.strip()
+
+def google_get_spreadsheet_sheets(access_token, spreadsheet_id):
+    """Returns list of sheet tab titles."""
+    data = _google_api_get(access_token, f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}?fields=sheets.properties.title")
+    return [s['properties']['title'] for s in data.get('sheets', [])]
+
+def google_get_sheet_as_tsv(access_token, spreadsheet_id, sheet_title):
+    """Returns sheet data as a TSV string."""
+    range_param = urllib.parse.quote(sheet_title)
+    data = _google_api_get(access_token, f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}/values/{range_param}")
+    rows = data.get('values', [])
+    return '\n'.join('\t'.join(str(c) for c in row) for row in rows)
 
 # endregion

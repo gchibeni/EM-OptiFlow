@@ -342,6 +342,76 @@ class EXPORTERS_OT_move_down(Operator):
 
 _AUTO_FILL_TEXT = "auto-fill-text"
 
+# Google auth state
+_google_auth_pending = False
+_google_auth_event_ref = None
+_google_auth_result_ref = None
+_google_sheet_tabs = []     # [title, ...]
+
+# URL auto-load debounce
+_url_last_change = 0.0
+_url_load_timer_registered = False
+
+
+def _load_tabs_deferred():
+    global _google_sheet_tabs, _url_load_timer_registered, _url_last_change
+    if time.time() - _url_last_change < 0.7:
+        return 0.8  # still typing, wait longer
+    _url_load_timer_registered = False
+    if not bpy.context or not bpy.context.scene:
+        return None
+    url = bpy.context.scene.auto_fill_spreadsheet_url.strip()
+    if not url or not google_is_authenticated():
+        return None
+    token = google_get_valid_token()
+    if not token:
+        return None
+    try:
+        spreadsheet_id = google_parse_spreadsheet_id(url)
+        _google_sheet_tabs = google_get_spreadsheet_sheets(token['access_token'], spreadsheet_id)
+    except Exception as e:
+        print(f"[OptiFlow] Auto-load sheet tabs failed: {e}")
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            area.tag_redraw()
+    return None
+
+
+def _on_spreadsheet_url_change(self, context):
+    global _google_sheet_tabs, _url_load_timer_registered, _url_last_change
+    _google_sheet_tabs = []
+    _url_last_change = time.time()
+    if not self.auto_fill_spreadsheet_url.strip() or not google_is_authenticated():
+        return
+    if not _url_load_timer_registered:
+        _url_load_timer_registered = True
+        bpy.app.timers.register(_load_tabs_deferred, first_interval=0.8)
+
+def _poll_google_auth():
+    global _google_auth_pending, _google_auth_event_ref, _google_auth_result_ref
+    if not _google_auth_event_ref or not _google_auth_event_ref.is_set():
+        return 1.0  # check again in 1s
+    result = _google_auth_result_ref
+    _google_auth_pending = False
+    _google_auth_event_ref = None
+    _google_auth_result_ref = None
+    if result and result.get('code'):
+        try:
+            google_exchange_code(result['code'], result['port'])
+        except Exception as e:
+            print(f"[OptiFlow] Token exchange failed: {e}")
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            area.tag_redraw()
+    return None
+
+
+def _sheet_tab_items(self, context):
+    if not _google_sheet_tabs:
+        return [('NONE', '— Load tabs first —', '')]
+    return [(t, t, '') for t in _google_sheet_tabs]
+
+
 class SCENEITEMS_OT_sku_input(Operator):
     """Persistent modal: typing while mouse is over Properties fills selected item SKU"""
     bl_idname = "sceneitems.sku_input"
@@ -379,6 +449,15 @@ class SCENEITEMS_OT_sku_input(Operator):
             return {'PASS_THROUGH'}
 
         item = scene.scene_items[scene.scene_items_index]
+
+        if event.type == 'TAB':
+            if "?" in item.sku:
+                item.sku = item.sku.replace("?", "")
+            else:
+                item.sku += '?'
+            for area in context.window.screen.areas:
+                area.tag_redraw()
+            return {'RUNNING_MODAL'}
 
         if event.type == 'BACK_SPACE':
             if item.sku:
@@ -428,36 +507,102 @@ class SCENEITEMS_OT_open_text_editor(Operator):
         area.spaces[0].text = text
         return {'FINISHED'}
 
-class SCENEITEMS_OT_get_ollama(Operator):
-    """Open the Ollama download page in your browser"""
-    bl_idname = "sceneitems.get_ollama"
-    bl_label = "Get Ollama"
+class SCENEITEMS_OT_google_auth(Operator):
+    """Open browser to authenticate with Google"""
+    bl_idname = "sceneitems.google_auth"
+    bl_label = "Connect to Google"
+    bl_description = "Sign in with Google to access your Sheets"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
-        import webbrowser
-        webbrowser.open("https://ollama.com/download")
+        global _google_auth_pending, _google_auth_event_ref, _google_auth_result_ref
+        try:
+            event, result = google_start_auth_flow()
+        except Exception as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+        _google_auth_pending = True
+        _google_auth_event_ref = event
+        _google_auth_result_ref = result
+        bpy.app.timers.register(_poll_google_auth, first_interval=1.0)
+        return {'FINISHED'}
+
+class SCENEITEMS_OT_google_auth_cancel(Operator):
+    """Cancel the pending Google authentication"""
+    bl_idname = "sceneitems.google_auth_cancel"
+    bl_label = "Cancel"
+    bl_description = "Cancel the pending Google authentication"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        global _google_auth_pending, _google_auth_event_ref, _google_auth_result_ref
+        _google_auth_pending = False
+        _google_auth_event_ref = None
+        _google_auth_result_ref = None
+        try:
+            bpy.app.timers.unregister(_poll_google_auth)
+        except Exception:
+            pass
+        return {'FINISHED'}
+
+class SCENEITEMS_OT_google_disconnect(Operator):
+    """Clear saved Google token"""
+    bl_idname = "sceneitems.google_disconnect"
+    bl_label = "Disconnect"
+    bl_description = "Disconnect Google account and clear saved token"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        global _google_sheet_tabs
+        google_clear_token()
+        _google_sheet_tabs = []
+        return {'FINISHED'}
+
+class SCENEITEMS_OT_google_load_tabs(Operator):
+    """Load sheet tabs for the entered spreadsheet URL or ID"""
+    bl_idname = "sceneitems.google_load_tabs"
+    bl_label = "Load Sheet Tabs"
+    bl_description = "Fetch the sheet tabs from the entered spreadsheet"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        global _google_sheet_tabs
+        url = context.scene.auto_fill_spreadsheet_url.strip()
+        if not url:
+            self.report({'ERROR'}, "Enter a spreadsheet URL or ID first.")
+            return {'CANCELLED'}
+        spreadsheet_id = google_parse_spreadsheet_id(url)
+        token = google_get_valid_token()
+        if not token:
+            self.report({'ERROR'}, "Not authenticated with Google.")
+            return {'CANCELLED'}
+        try:
+            _google_sheet_tabs = google_get_spreadsheet_sheets(token['access_token'], spreadsheet_id)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to load sheet tabs: {e}")
+            return {'CANCELLED'}
         return {'FINISHED'}
 
 class SCENEITEMS_OT_auto_fill(Operator):
-    """Auto-fill SKUs by matching collection names against a pasted SKU list"""
+    """Auto-fill SKUs by matching collection names against a SKU list"""
     bl_idname = "sceneitems.auto_fill"
     bl_label = "Auto Fill SKUs"
     bl_options = {'REGISTER', 'UNDO'}
 
-    model_name: EnumProperty(
-        name="Model",
+    source: EnumProperty(
+        name="Source",
         items=[
-            ("qwen2.5:1.5b",  "Qwen 2.5 1.5B (fast)",   ""),
-            ("qwen2.5:3b",    "Qwen 2.5 3B",             ""),
-            ("qwen2.5:7b",    "Qwen 2.5 7B (accurate)",  ""),
-            ("llama3.2:1b",   "Llama 3.2 1B (fast)",     ""),
-            ("llama3.2:3b",   "Llama 3.2 3B",            ""),
-            ("mistral:7b",    "Mistral 7B",               ""),
+            ('GOOGLE_SHEETS', "Google Sheets", "Import from a Google Spreadsheet"),
+            ('FILE', "File", "Load from a CSV or TSV file"),
+            ('TEXT_EDITOR', "Text Editor", "Paste data in Blender's Text Editor"),
         ],
-        default="qwen2.5:1.5b",
+        default='GOOGLE_SHEETS',
     )  # type: ignore
-    _ollama_running: bool = False
+
+    sheet_tab: EnumProperty(
+        name="Sheet",
+        items=_sheet_tab_items,
+    )  # type: ignore
 
     @staticmethod
     def _get_text():
@@ -468,32 +613,89 @@ class SCENEITEMS_OT_auto_fill(Operator):
 
     def draw(self, context):
         layout = self.layout
-        text = self._get_text()
+        scene = context.scene
 
-        if self._ollama_running:
-            layout.prop(self, "model_name")
-        else:
-            row = layout.row(align=True)
-            row.label(text="Ollama not running", icon='ERROR')
-            layout.operator("sceneitems.get_ollama", text="Download Ollama", icon='URL')
-            layout.label(text="Install Ollama, then run: ollama pull qwen2.5:1.5b", icon='INFO')
-        layout.separator(type="LINE")
-        layout.operator("sceneitems.open_text_editor", icon='TEXT')
+        row = layout.row(align=True)
+        row.prop(self, "source", expand=True)
+        layout.separator(type='LINE')
 
-        line_count = len(text.lines)
-        has_content = text.as_string().strip()
-        if has_content:
-            layout.label(text=f"{line_count} line(s) loaded.", icon='CHECKMARK')
-        else:
-            layout.label(text="No list loaded yet. Open the Text Editor to paste.", icon='INFO')
+        if self.source == 'TEXT_EDITOR':
+            layout.operator("sceneitems.open_text_editor", icon='TEXT')
+            text = self._get_text()
+            if text.as_string().strip():
+                layout.label(text=f"{len(text.lines)} line(s) loaded.", icon='CHECKMARK')
+            else:
+                layout.label(text="No list loaded yet. Open the Text Editor to paste.", icon='INFO')
 
-        layout.separator(type="LINE")
+        elif self.source == 'FILE':
+            file_input(layout, scene, "File:", "auto_fill_file_path", "csv,tsv,txt")
+            path = bpy.path.abspath(scene.auto_fill_file_path) if scene.auto_fill_file_path else ""
+            if path and os.path.isfile(path):
+                layout.label(text=f"Ready: {os.path.basename(path)}", icon='CHECKMARK')
+            else:
+                layout.label(text="Select a CSV or TSV file.", icon='INFO')
+
+        elif self.source == 'GOOGLE_SHEETS':
+            if _google_auth_pending:
+                row = layout.row(align=True)
+                row.label(text="Waiting for browser authentication...", icon='TIME')
+                row.operator("sceneitems.google_auth_cancel", text="", icon='X')
+            elif not google_is_authenticated():
+                layout.operator("sceneitems.google_auth", text="Connect to Google", icon='URL')
+            else:
+                layout.prop(scene, "auto_fill_spreadsheet_url", text="URL / ID")
+                if _google_sheet_tabs:
+                    layout.prop(self, "sheet_tab")
+                row = layout.row()
+                row.operator("sceneitems.google_load_tabs", text="Refresh", icon='FILE_REFRESH')
+                row.operator("sceneitems.google_disconnect", text="", icon='X')
+        layout.separator(type='LINE')
+
 
     def execute(self, context):
         scene = context.scene
-        text = bpy.data.texts.get(_AUTO_FILL_TEXT)
-        if not text or not text.as_string().strip():
-            self.report({'ERROR'}, "The SKU list is empty.")
+
+        if self.source == 'TEXT_EDITOR':
+            text = bpy.data.texts.get(_AUTO_FILL_TEXT)
+            if not text or not text.as_string().strip():
+                self.report({'ERROR'}, "The SKU list is empty.")
+                return {'CANCELLED'}
+            content = text.as_string()
+
+        elif self.source == 'FILE':
+            path = bpy.path.abspath(scene.auto_fill_file_path) if scene.auto_fill_file_path else ""
+            if not path or not os.path.isfile(path):
+                self.report({'ERROR'}, "Select a valid file.")
+                return {'CANCELLED'}
+            with open(path, encoding='utf-8', errors='replace') as f:
+                raw = f.read()
+            if os.path.splitext(path)[1].lower() == '.csv':
+                import csv, io
+                content = '\n'.join('\t'.join(row) for row in csv.reader(io.StringIO(raw)))
+            else:
+                content = raw
+
+        elif self.source == 'GOOGLE_SHEETS':
+            url = context.scene.auto_fill_spreadsheet_url.strip()
+            if not url:
+                self.report({'ERROR'}, "Enter a spreadsheet URL or ID.")
+                return {'CANCELLED'}
+            if not self.sheet_tab or self.sheet_tab == 'NONE':
+                self.report({'ERROR'}, "No sheet selected. Enter a valid spreadsheet URL.")
+                return {'CANCELLED'}
+            token = google_get_valid_token()
+            if not token:
+                self.report({'ERROR'}, "Not authenticated with Google.")
+                return {'CANCELLED'}
+            spreadsheet_id = google_parse_spreadsheet_id(url)
+            try:
+                content = google_get_sheet_as_tsv(token['access_token'], spreadsheet_id, self.sheet_tab)
+                context.scene.auto_fill_sheet_tab = self.sheet_tab
+            except Exception as e:
+                self.report({'ERROR'}, f"Failed to fetch sheet: {e}")
+                return {'CANCELLED'}
+
+        else:
             return {'CANCELLED'}
 
         unmatched = [i for i in scene.scene_items if i.collection and not i.sku]
@@ -501,19 +703,26 @@ class SCENEITEMS_OT_auto_fill(Operator):
             self.report({'INFO'}, "All items already have SKUs.")
             return {'CANCELLED'}
 
-        collection_names = [i.collection.name for i in unmatched]
-        results = auto_fill_skus(text.as_string(), collection_names, self.model_name)
+        collection_queries = {
+            i.collection.name: " ".join(filter(None, [i.collection.name, i.subfolder.strip()]))
+            for i in unmatched
+        }
+        results = auto_fill_skus(content, collection_queries)
 
         if not results:
-            self.report({'WARNING'}, "No matches found. Paste a tab-separated spreadsheet with a SKU column, or a plain list with SKU first on each line.")
+            self.report({'WARNING'}, "No matches found.")
             return {'CANCELLED'}
 
         count = 0
         for item in unmatched:
             if item.collection.name in results:
                 sku = results[item.collection.name]
+                if not sku:
+                    continue
                 if 'offset' in item.subfolder.lower():
                     sku += '.OFFSET'
+                if 'chiseled' in item.subfolder.lower():
+                    sku += '.CHISELED'
                 item.sku = sku
                 count += 1
         self.report({'INFO'}, f"Filled {count} / {len(unmatched)} SKUs.")
@@ -521,7 +730,9 @@ class SCENEITEMS_OT_auto_fill(Operator):
 
     def invoke(self, context, event):
         self._get_text()
-        self._ollama_running = ollama_running()
-        return context.window_manager.invoke_props_dialog(self, width=400, confirm_text="Auto Fill")
+        remembered = context.scene.auto_fill_sheet_tab
+        if remembered and remembered in _google_sheet_tabs:
+            self.sheet_tab = remembered
+        return context.window_manager.invoke_props_dialog(self, width=420, confirm_text="Auto Fill")
 
 # endregion
