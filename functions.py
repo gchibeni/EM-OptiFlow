@@ -490,6 +490,7 @@ def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_ove
 def import_textures(obj, texture_folder, texture_size, basecolor_override=None, backface_culling=False):
     if not obj:
         return None
+    texture_folder = bpy.path.abspath(texture_folder)
     max_size = int(texture_size)
     # Find textures
     basecolor_path = find_texture(texture_folder, basecolor_names) if not basecolor_override else basecolor_override
