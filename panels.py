@@ -90,7 +90,8 @@ class SCENEITEMS_PT_optimization(Panel):
             icon_only=True,
             emboss=False
         )
-        row.label(text="Items")
+        count = len(scene.scene_items)
+        row.label(text=f"Items ({count})" if count else "Items")
         if scene.show_items:
             row = layout.row()
             # List
