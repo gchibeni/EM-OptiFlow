@@ -123,6 +123,8 @@ class SCENEITEMS_PT_optimization(Panel):
                 row = box.row()
                 row.prop(item, "item_type")
                 row.prop(scene, "code", text="Code", placeholder="EM")
+                row = box.split()
+                row.prop(scene, "series", text="Series", placeholder="")
                 box.separator(type="LINE")
                 box.prop(item, "collection")
                 box.prop(item, "sku")

@@ -160,9 +160,14 @@ class SCENEITEMS_OT_remove(Operator):
         scene = context.scene
         index = scene.scene_items_index
 
-        if scene.scene_items:
-            scene.scene_items.remove(index)
-            scene.scene_items_index = max(0, index - 1)
+        if not scene.scene_items:
+            return {'CANCELLED'}
+
+        collection = scene.scene_items[index].collection
+        scene.scene_items.remove(index)
+        scene.scene_items_index = max(0, index - 1)
+        if collection:
+            delete_collection_with_contents(collection)
 
         return {'FINISHED'}
 
@@ -471,7 +476,26 @@ class SCENEITEMS_OT_sku_input(Operator):
                 for i in scene.scene_items:
                     i.sku = ""
             else:
-                item.sku = ""
+                index = scene.scene_items_index
+                collection = item.collection
+                scene.scene_items.remove(index)
+                scene.scene_items_index = max(0, index - 1)
+                if collection:
+                    delete_collection_with_contents(collection)
+            for area in context.window.screen.areas:
+                area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'V' and (event.ctrl or event.oskey):
+            item.sku = context.window_manager.clipboard
+            for area in context.window.screen.areas:
+                area.tag_redraw()
+            return {'RUNNING_MODAL'}
+
+        if event.type == 'RET' and event.ctrl:
+            for i, it in enumerate(scene.scene_items):
+                if not it.sku:
+                    it.sku = str(i + 1)
             for area in context.window.screen.areas:
                 area.tag_redraw()
             return {'RUNNING_MODAL'}
@@ -703,11 +727,19 @@ class SCENEITEMS_OT_auto_fill(Operator):
             self.report({'INFO'}, "All items already have SKUs.")
             return {'CANCELLED'}
 
+        series = scene.series.strip() if scene.series else ""
         collection_queries = {
-            i.collection.name: " ".join(filter(None, [i.collection.name, i.subfolder.strip()]))
+            i.collection.name: " ".join(filter(None, [i.collection.name, i.subfolder.strip(), series]))
             for i in unmatched
         }
-        results = auto_fill_skus(content, collection_queries)
+        item_meta = {
+            i.collection.name: {
+                'series': series,
+                'subfolder': i.subfolder.strip(),
+            }
+            for i in unmatched
+        }
+        results = auto_fill_skus(content, collection_queries, item_meta=item_meta)
 
         if not results:
             self.report({'WARNING'}, "No matches found.")

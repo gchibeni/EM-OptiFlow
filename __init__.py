@@ -54,6 +54,7 @@ def register():
     Scene.copyright_text = StringProperty(name="Copyright")
     Scene.export_path = StringProperty(name="Export Path")
     Scene.code = StringProperty(name="Code")
+    Scene.series = StringProperty(name="Series")
     Scene.import_model = StringProperty(name="Model")
     Scene.import_collider = StringProperty(name="Collider")
     Scene.import_texture_folder = StringProperty(name="Texture folder")

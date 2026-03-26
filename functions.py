@@ -28,6 +28,16 @@ fbx_map = {"Bullnose": "MESH_BULLNOSE.fbx", "Covebase": "MESH_COVEBASE.fbx"}
 
 # region General
 
+def delete_collection_with_contents(collection):
+    """Remove a collection and all objects/child collections it contains."""
+    if collection is None:
+        return
+    for child in list(collection.children):
+        delete_collection_with_contents(child)
+    for obj in list(collection.objects):
+        bpy.data.objects.remove(obj, do_unlink=True)
+    bpy.data.collections.remove(collection)
+
 def purge_unused_data():
     # Images
     for img in bpy.data.images:
@@ -309,7 +319,8 @@ def export_item(item, exporter):
     collection = item.collection
     print(f"Exporting {collection.name} = {item_name} | {get_copyright()}")
     os.makedirs(final_path, exist_ok=True)
-    bpy.ops.object.select_all(action='DESELECT')
+    for obj in bpy.context.view_layer.objects:
+        obj.select_set(False)
     objs = [obj for obj in collection.all_objects if obj.type == 'MESH']
     if not objs:
         return
@@ -354,10 +365,11 @@ def export_item(item, exporter):
 
 # region Importer
 
-def get_temp_path(filepath, max_size):
+def get_temp_path(filepath, max_size, subfolder = ""):
+    sub = subfolder.replace("/", "_").replace("\\", "_")
     base = os.path.splitext(os.path.basename(filepath))[0]
     res = f"{int(max_size/1024)}K"
-    name = f"{base}_{res}"
+    name = f"{sub}_{base}_{res}" if sub != "" else f"{base}_{res}"
     ext = "jpg"
     temp_dir = bpy.app.tempdir
     temp_path = os.path.join(temp_dir, f"{name}.{ext}")
@@ -368,8 +380,8 @@ def get_temp_path(filepath, max_size):
         i += 1
     return temp_path
 
-def load_and_resize_texture(filepath, max_size, is_color=True):
-    temp_path = get_temp_path(filepath, max_size)
+def load_and_resize_texture(filepath, max_size, is_color=True, subfolder = ""):
+    temp_path = get_temp_path(filepath, max_size, subfolder)
     # Use filename as Blender image name
     image_name = os.path.basename(temp_path)
     # Check if already exists in Blender
@@ -484,10 +496,10 @@ def create_tile_mesh(texture_folder, texture_size, subfolder = "", basecolor_ove
         item.subfolder = subfolder.strip()
         item.mesh_type = fbx_key.upper() if fbx_key else 'TILES'
         item.collection = collection
-        import_textures(obj, texture_folder, texture_size, basecolor_override, backface_culling=True)
+        import_textures(obj, texture_folder, texture_size, basecolor_override, True, subfolder)
     return obj
 
-def import_textures(obj, texture_folder, texture_size, basecolor_override=None, backface_culling=False):
+def import_textures(obj, texture_folder, texture_size, basecolor_override=None, backface_culling=False, subfolder = ""):
     if not obj:
         return None
     texture_folder = bpy.path.abspath(texture_folder)
@@ -517,11 +529,11 @@ def import_textures(obj, texture_folder, texture_size, basecolor_override=None, 
     output.location = (300, 0)
     links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
     # Load textures
-    basecolor_tex = load_and_resize_texture(basecolor_path, max_size, True)
-    roughness_tex = load_and_resize_texture(roughness_path, max_size, False) if roughness_path else None
-    reflect_tex = load_and_resize_texture(reflect_path, max_size, False) if reflect_path else None
-    metallic_tex = load_and_resize_texture(metallic_path, max_size, False) if metallic_path else None
-    normal_tex = load_and_resize_texture(normal_path, max_size, False) if normal_path else None
+    basecolor_tex = load_and_resize_texture(basecolor_path, max_size, True, subfolder)
+    roughness_tex = load_and_resize_texture(roughness_path, max_size, False, subfolder) if roughness_path else None
+    reflect_tex = load_and_resize_texture(reflect_path, max_size, False, subfolder) if reflect_path else None
+    metallic_tex = load_and_resize_texture(metallic_path, max_size, False, subfolder) if metallic_path else None
+    normal_tex = load_and_resize_texture(normal_path, max_size, False, subfolder) if normal_path else None
     # Wire nodes
     def get_or_create_tex(label, image, sRGB=True):
         for n in nodes:
@@ -560,7 +572,7 @@ def start_tiles_import(texture_folder, texture_size):
     purge_unused_data()
 
 def import_tiles(texture_folder, texture_size, subfolder="", depth=0):
-    if depth >= 4:
+    if depth >= 5:
         return
     path = bpy.path.abspath(texture_folder)
     # Check if there's tiles in folder
@@ -707,56 +719,131 @@ def _find_sku_column(headers, rows):
 _FUZZY_MIN_SCORE = 0.3   # below this: no match
 _FUZZY_CONFIDENT = 0.6   # below this: append "?" to signal uncertainty
 
+_DIM_RE = re.compile(r'^\d+x\d+')
 
-def _auto_fill_fuzzy(lines, collection_queries, text_content=None):
-    """Match collection names to SKUs using token overlap scoring.
+
+def _is_row_inactive(row, status_col):
+    """Return True if the row should be excluded (inactive/discontinued)."""
+    if status_col:
+        status = row.get(status_col, '').strip().upper()
+        if status and status not in ('ACTIVE', ''):
+            return True
+    return any('discontinued' in v.lower() for v in row.values() if v)
+
+
+def _auto_fill_fuzzy(lines, collection_queries, text_content=None, item_meta=None):
+    """Match collection names to SKUs using structured or token-overlap scoring.
 
     collection_queries: {collection_name: query_string}
-      The query string can include extra context (e.g. subfolder) beyond the collection name.
+    item_meta: optional {collection_name: {'series': str, 'subfolder': str}}
+      When provided and the source is TSV, uses structured multi-signal scoring:
+        - Series tokens (vendor series / collection name)  → 30 %
+        - Color tokens (derived from collection name)       → 40 %
+        - Shape tokens (from collection name primarily)     → 20 %
+        - Finish tokens (from subfolder)                    → 10 %
 
     - Confident match (score >= 0.6): returns the SKU as-is.
     - Uncertain match (0.3 <= score < 0.6): appends "?" to the SKU.
     """
-    parsed = []  # [(sku, frozenset_of_tokens)]
-
-    def _is_discontinued(values):
-        return any('discontinued' in v.lower() for v in values if v)
 
     tsv = _parse_tsv(text_content) if text_content else None
+
     if tsv:
         headers, rows = tsv
         sku_col = _find_sku_column(headers, rows)
         if sku_col:
+            status_col = next((h for h in headers if h.strip().lower() == 'status'), None)
             match_cols = [h for h in headers if h != sku_col]
+
+            # Pre-filter and pre-tokenise active rows
+            active_rows = []
             for row in rows:
-                if _is_discontinued(row.values()):
+                if _is_row_inactive(row, status_col):
                     continue
-                sku = row.get(sku_col, "").strip()
+                sku = row.get(sku_col, '').strip()
                 if not sku:
                     continue
-                parts = [row.get(c, "").strip() for c in match_cols if row.get(c, "").strip()]
-                match_str = " ".join(parts)
-                if match_str.strip():
-                    parsed.append((sku, frozenset(_normalize_for_match(match_str).split())))
-        else:
-            # No SKU column found — try every token on each line as a potential SKU
-            for line in lines[1:]:  # skip header
-                if _is_discontinued([line]):
+                parts = [row.get(c, '').strip() for c in match_cols if row.get(c, '').strip()]
+                row_tokens = frozenset(_normalize_for_match(' '.join(parts)).split())
+                active_rows.append((sku, row_tokens))
+
+            if not active_rows:
+                return {}
+
+            results = {}
+            for col_name, query_str in collection_queries.items():
+                meta = (item_meta or {}).get(col_name, {})
+                series_str = meta.get('series', '').strip()
+                subfolder_str = meta.get('subfolder', '').strip()
+
+                series_tokens = frozenset(_normalize_for_match(series_str).split()) if series_str else frozenset()
+                subfolder_tokens = frozenset(_normalize_for_match(subfolder_str).split()) if subfolder_str else frozenset()
+                coll_tokens = frozenset(_normalize_for_match(col_name).split())
+
+                # Shape: use collection name as primary source, subfolder as fallback
+                coll_shape = frozenset(t for t in coll_tokens if _DIM_RE.match(t))
+                sub_shape = frozenset(t for t in subfolder_tokens if _DIM_RE.match(t))
+                shape_tokens = coll_shape if coll_shape else sub_shape
+
+                # Finish: subfolder is the most reliable source
+                finish_tokens = frozenset(t for t in subfolder_tokens if t in _FINISH_TERMS)
+
+                # Color: what's left in the collection name after removing known non-color tokens
+                color_tokens = frozenset(
+                    t for t in coll_tokens
+                    if t not in series_tokens
+                    and not _NOISE_TOKEN_RE.match(t)
+                    and t not in _FINISH_TERMS
+                ) - coll_shape
+
+                use_structured = bool(series_tokens or color_tokens)
+
+                scored = []
+                for sku, row_tokens in active_rows:
+                    if use_structured:
+                        s_score = len(series_tokens & row_tokens) / len(series_tokens) if series_tokens else 0.5
+                        sh_score = len(shape_tokens & row_tokens) / len(shape_tokens) if shape_tokens else 0.5
+                        row_finish = _finish_tokens(row_tokens)
+                        if finish_tokens:
+                            fin_match = len(finish_tokens & row_finish)
+                            fin_extra = len(row_finish - finish_tokens)
+                            fin_score = max(0.0, (fin_match - 0.5 * fin_extra) / len(finish_tokens))
+                        else:
+                            fin_score = 0.5
+                        c_score = len(color_tokens & row_tokens) / len(color_tokens) if color_tokens else 0.0
+                        total = 0.30 * s_score + 0.40 * c_score + 0.20 * sh_score + 0.10 * fin_score
+                    else:
+                        query = frozenset(_normalize_for_match(query_str).split())
+                        query_main = _meaningful_tokens(query)
+                        cand_main = _meaningful_tokens(row_tokens)
+                        total = len(query_main & cand_main) / len(query_main) if query_main else 0.0
+                    scored.append((sku, total))
+
+                best_sku, best_score = max(scored, key=lambda x: x[1])
+                if best_score < _FUZZY_MIN_SCORE:
                     continue
-                tokens = line.split()
-                for i, tok in enumerate(tokens):
-                    if re.match(r'^\d[\d.\-/]+$', tok):
-                        rest = " ".join(tokens[:i] + tokens[i+1:])
-                        parsed.append((tok, frozenset(_normalize_for_match(rest).split())))
-                        break
-                else:
-                    # Fallback: first token is SKU
-                    parts = line.split(None, 1)
-                    if len(parts) == 2:
-                        parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
+                results[col_name] = best_sku if best_score >= _FUZZY_CONFIDENT else best_sku + "?"
+            return results
+
+        # No SKU column found — flat fallback
+        parsed = []
+        for line in lines[1:]:
+            if any('discontinued' in v.lower() for v in [line] if v):
+                continue
+            tokens = line.split()
+            for i, tok in enumerate(tokens):
+                if re.match(r'^\d[\d.\-/]+$', tok):
+                    rest = " ".join(tokens[:i] + tokens[i+1:])
+                    parsed.append((tok, frozenset(_normalize_for_match(rest).split())))
+                    break
+            else:
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
     else:
+        parsed = []
         for line in lines:
-            if _is_discontinued([line]):
+            if any('discontinued' in v.lower() for v in [line] if v):
                 continue
             tokens = line.split()
             for i, tok in enumerate(tokens):
@@ -769,6 +856,7 @@ def _auto_fill_fuzzy(lines, collection_queries, text_content=None):
                 if len(parts) == 2:
                     parsed.append((parts[0].strip(), frozenset(_normalize_for_match(parts[1]).split())))
 
+    # Flat token-overlap scoring (non-TSV or no SKU column)
     if not parsed:
         return {}
 
@@ -777,44 +865,39 @@ def _auto_fill_fuzzy(lines, collection_queries, text_content=None):
         query = frozenset(_normalize_for_match(query_str).split())
         if not query:
             continue
-
         query_main = _meaningful_tokens(query)
         query_dim = query - query_main
         query_finish = _finish_tokens(query_main)
-
         scored = []
         for sku, tokens in parsed:
             cand_main = _meaningful_tokens(tokens)
             cand_dim = tokens - cand_main
             cand_finish = _finish_tokens(cand_main)
             main_score = len(query_main & cand_main) / len(query_main) if query_main else 0.0
-            # Dimension tiebreaker: penalise mismatched sizes
             dim_score = len(query_dim & cand_dim) / len(query_dim) if query_dim and cand_dim else 1.0
-            # Finish tiebreaker: reward matching finish terms, penalise extra ones in candidate
             finish_score = len(query_finish & cand_finish) - len(cand_finish - query_finish)
             scored.append((sku, main_score, dim_score, finish_score))
-
         best_main = max(m for _, m, _, _ in scored)
         if best_main < _FUZZY_MIN_SCORE:
             continue
-
         best_sku, best_main_s, _, _ = max(scored, key=lambda x: (x[1], x[2], x[3]))
-        result = best_sku if best_main_s >= _FUZZY_CONFIDENT else best_sku + "?"
-        results[col_name] = result
+        results[col_name] = best_sku if best_main_s >= _FUZZY_CONFIDENT else best_sku + "?"
     return results
 
-def auto_fill_skus(text_content, collection_queries):
+def auto_fill_skus(text_content, collection_queries, item_meta=None):
     """Match collection names to SKUs from text_content using fuzzy matching.
 
     collection_queries: {collection_name: query_string}
-      Pass extra context in the query string (e.g. append subfolder) to improve matching.
+    item_meta: optional {collection_name: {'series': str, 'subfolder': str}}
+      Providing item_meta enables structured multi-signal scoring (series, color,
+      shape, finish) which is significantly more accurate than flat token overlap.
 
     Returns dict {collection_name: sku}.
     """
     lines = [l.strip() for l in text_content.splitlines() if l.strip()]
     if not lines or not collection_queries:
         return {}
-    return _auto_fill_fuzzy(lines, collection_queries, text_content)
+    return _auto_fill_fuzzy(lines, collection_queries, text_content, item_meta=item_meta)
 
 # endregion
 
