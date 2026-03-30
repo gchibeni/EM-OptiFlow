@@ -119,15 +119,15 @@ class EXPORTERS_OT_edit(Operator):
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):
-        from ..ui.file_dialogs import dir_input
+        from ..ui.file_dialogs import dir_input, prop_input
         layout = self.layout
-        layout.prop(self, "edit_exporter_type")
+        prop_input(layout, self, "Exporter:", "edit_exporter_type")
         dir_input(layout, self, "Override Path:", "edit_override_path")
-        layout.prop(self, "edit_prefix")
+        prop_input(layout, self, "Prefix:", "edit_prefix")
         layout.separator(type='LINE')
-        layout.prop(self, "edit_embed_materials")
+        prop_input(layout, self, "Embed Materials:", "edit_embed_materials")
         if self.edit_exporter_type != 'OBJ':
-            layout.prop(self, "edit_animations")
+            prop_input(layout, self, "Animations:", "edit_animations")
         layout.separator(type='LINE')
 
     def execute(self, context):

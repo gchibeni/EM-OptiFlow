@@ -2,6 +2,29 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty
 
+# region Text Editor
+
+class OPT_OT_open_autofill_text(Operator):
+    """Open the Auto-Fill text block in a small text editor window."""
+    bl_idname  = "optiflow.open_autofill_text"
+    bl_label   = "Open Editor"
+    bl_description = "Open the Auto-Fill text block in a text editor window"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        text_name = "Auto-Fill"
+        text_block = bpy.data.texts.get(text_name)
+        if text_block is None:
+            text_block = bpy.data.texts.new(text_name)
+        bpy.ops.wm.window_new()
+        window = context.window_manager.windows[-1]
+        area = window.screen.areas[0]
+        area.type = 'TEXT_EDITOR'
+        area.spaces[0].text = text_block
+        return {'FINISHED'}
+
+# endregion
+
 # region Auto Fill
 
 class optiflow_auto_fill(Operator):
@@ -9,7 +32,7 @@ class optiflow_auto_fill(Operator):
     bl_idname  = "optiflow.auto_fill"
     bl_label   = "Auto Fill"
     bl_description = "Automatically rename items based on a providede list"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}
 
     source: EnumProperty(
         name="Source",
@@ -25,7 +48,6 @@ class optiflow_auto_fill(Operator):
         name="Method",
         items=[
             ('FUZZY', "Fuzzy", "Fill based on fuzzy matching"),
-            ('EXACT', "Exact", "Fill based on exact matching"),
             ('AI', "AI/Semantic", "Fill based on AI-assisted matching (requires internet connection)"),
         ],
         default='FUZZY',
@@ -43,18 +65,18 @@ class optiflow_auto_fill(Operator):
     )  # type: ignore
 
     def draw(self, context):
-        from ..ui.file_dialogs import file_input
+        from ..ui.file_dialogs import file_input, prop_input
         layout = self.layout
-        row = layout.row(align=True)
-        row.prop(self, "source", expand=True)
+        prop_input(layout, self, "Source:", "source", expand=True)
         layout.separator(type='LINE')
-        row = layout.row(align=True)
-        row.prop(self, "key_name")
+        prop_input(layout, self, "Key:", "key_name")
         _google_login = 'ONLINE'
         if self.source == 'TEXT_EDITOR':
-            row = layout.row(align=True)
-            row.operator("optiflow.placeholder")
-            row.operator("optiflow.placeholder", text="", icon='TEXT')
+            split = layout.split(factor=0.23)
+            split.label(text="Text:")
+            row = split.row(align=True)
+            row.operator("optiflow.open_autofill_text")
+            row.operator("optiflow.open_autofill_text", text="", icon='TEXT')
         elif self.source == 'FILE':
             file_input(layout, self, "File:", "file_path", "csv,tsv,txt")
         elif self.source == 'GOOGLE_SHEETS':
@@ -71,16 +93,12 @@ class optiflow_auto_fill(Operator):
                     icon='URL',
                 )
             else:
-                row = layout.row(align=True)
-                row.prop(self, "sheet_url", text="URL / ID")
+                row = prop_input(layout, self, "URL / ID:", "sheet_url")
                 row.operator("optiflow.placeholder", text="", icon='INTERNET_OFFLINE')
-                row = layout.row(align=True)
-                row.prop(self, "sheet_tab")
+                row = prop_input(layout, self, "Sheet:", "sheet_tab")
                 row.operator("optiflow.placeholder", text="", icon='FILE_REFRESH')
         layout.separator(type='LINE')
-        row = layout.row(align=True)
-        row.label(text="Method:")
-        row.prop(self, "method", expand=True)
+        row = prop_input(layout, self, "Method:", "method", expand=True)
         row.operator("optiflow.placeholder", text="", icon='UNLINKED')
         layout.separator(type='LINE')
         row = layout.row()

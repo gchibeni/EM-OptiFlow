@@ -179,6 +179,18 @@ class UI_OT_select_filepath(Operator):
 
 # region Helpers
 
+def prop_input(layout, data, label, prop_name, expand=False):
+    """Draw a property input row with consistent label-input split."""
+    split = layout.split(factor=0.23)
+    split.label(text=label)
+    row = split.row(align=True)
+    if expand:
+        row.prop(data, prop_name, expand=True)
+    else:
+        row.prop(data, prop_name, text="")
+    return row
+
+
 def dir_input(layout, context, label, target_prop):
     """Draw a directory path input row with browse button."""
     split = layout.split(factor=0.23)

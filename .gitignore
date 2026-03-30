@@ -19,7 +19,7 @@ __pycache__/
 Thumbs.db
 
 # Addon specific
-# If your addon generates specific output files, list them here
+wheels/
 
 # Credentials
 credentials.json

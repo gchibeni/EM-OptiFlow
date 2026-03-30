@@ -37,12 +37,16 @@ license = [
 # platforms = ["windows-x64", "macos-arm64", "linux-x64"]
 # Other supported platforms: "windows-arm64", "macos-x64"
 
-# Optional: bundle 3rd party Python modules.
+# Bundle 3rd party Python modules.
 # https://docs.blender.org/manual/en/dev/advanced/extensions/python_wheels.html
-# wheels = [
-#   "./wheels/hexdump-3.3-py3-none-any.whl",
-#   "./wheels/jsmin-3.0.1-py3-none-any.whl",
-# ]
+wheels = [
+  "./wheels/pillow-12.1.1-cp311-cp311-macosx_10_10_x86_64.whl",
+  "./wheels/pillow-12.1.1-cp311-cp311-macosx_11_0_arm64.whl",
+  "./wheels/pillow-12.1.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+  "./wheels/pillow-12.1.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+  "./wheels/pillow-12.1.1-cp311-cp311-win_amd64.whl",
+  "./wheels/pillow-12.1.1-cp311-cp311-win_arm64.whl",
+]
 
 # Optional: add-ons can list which resources they will require:
 # * files (for access of any filesystem operations)

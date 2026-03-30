@@ -170,15 +170,16 @@ class OPT_OT_edit_item(Operator):
         return context.window_manager.invoke_props_dialog(self, width=300)
 
     def draw(self, context):
+        from ..ui.file_dialogs import prop_input
         fe   = helpers.get_active_entry(context.scene)
         item = context.scene.optiflow_groups[fe.group_index].items[fe.item_index]
         layout = self.layout
-        layout.prop(self, "edit_name")
-        layout.prop(self, "edit_alias")
-        layout.prop(self, "edit_item_type")
+        prop_input(layout, self, "Name:", "edit_name")
+        prop_input(layout, self, "Alias:", "edit_alias")
+        prop_input(layout, self, "Type:", "edit_item_type")
         if self.edit_item_type == 'TILE/MATERIAL':
             layout.separator(type='LINE')
-            layout.prop(self, "edit_tile_mesh")
+            prop_input(layout, self, "Mesh:", "edit_tile_mesh")
         layout.separator(type='LINE')
         layout.label(text="Objects:")
         box = layout.box()

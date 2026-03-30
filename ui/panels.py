@@ -1,7 +1,7 @@
 import bpy
 import os
 from bpy.types import Operator, Panel
-from .file_dialogs import dir_input
+from .file_dialogs import dir_input, prop_input
 
 # region Header
 
@@ -121,7 +121,7 @@ def _draw_exporters_section(layout, scene):
         col.menu("EXPORTERS_MT_add_menu", icon='ADD', text="")
         col.separator(type='LINE', factor=5.0)
         dir_input(layout, scene, "Export Path:", "export_path")
-        layout.prop(scene, "copyright_text")
+        prop_input(layout, scene, "Copyright:", "copyright_text")
 
 
 def _draw_export_button(layout, scene):
