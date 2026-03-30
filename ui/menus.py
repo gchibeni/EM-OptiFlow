@@ -11,7 +11,7 @@ class OPT_MT_add_menu(Menu):
     """Menu for adding groups, items, or empty entries."""
     bl_idname = "OPT_MT_add_menu"
     bl_label  = "Add"
-    bl_description = "Shows extra item options"
+    bl_description = "Create a new group, item, or empty entry in the current group"
 
     def draw(self, context):
         layout = self.layout
@@ -27,7 +27,8 @@ class OPT_MT_add_menu(Menu):
 class EXPORTERS_MT_add_menu(Menu):
     """Menu for adding exporters by format type."""
     bl_idname = "EXPORTERS_MT_add_menu"
-    bl_label  = "Add Exporter"
+    bl_label  = "Add"
+    bl_description = "Create a new exporter of the specified format"
 
     def draw(self, context):
         layout = self.layout

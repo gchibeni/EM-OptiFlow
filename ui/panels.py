@@ -24,7 +24,7 @@ class optiflow_options(Operator):
     """Toggle the OptiFlow side panel visibility."""
     bl_idname  = "optiflow.options"
     bl_label   = "OptiFlow"
-    bl_description = "Open optimizations popup window."
+    bl_description = "Open main panel for the optimization helper."
 
     def execute(self, context):
         space     = context.space_data

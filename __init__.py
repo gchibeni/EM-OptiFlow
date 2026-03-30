@@ -14,12 +14,12 @@
 bl_info = {
     "name": "EM-OptiFlow2",
     "author": "gchibeni",
-    "description": "",
+    "description": "A workflow optimization add-on designed to automate/help on repetitive tasks across the 3D pipeline for optimizations—handling PBR texture acquisition, conversion, compression, standardization, batch imports/exports.",
     "blender": (5, 0, 0),
-    "version": (0, 0, 1),
+    "version": (0, 1, 0),
     "location": "",
     "warning": "",
-    "category": "Generic",
+    "category": "Optimization",
 }
 
 from . import auto_load

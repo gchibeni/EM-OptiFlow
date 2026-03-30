@@ -25,8 +25,8 @@ def _copy_exporter_props(src, dst):
 class EXPORTERS_OT_add(Operator):
     """Add a new exporter configuration."""
     bl_idname  = "exporters.add"
-    bl_label   = "Add Exporter"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_label   = "Add"
+    bl_options = {'UNDO'}
 
     exporter_type: EnumProperty(
         name="Type", items=constants.EXPORTER_TYPE,
