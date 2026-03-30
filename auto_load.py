@@ -160,13 +160,6 @@ def get_register_base_types():
             "RenderEngine",
             "Gizmo",
             "GizmoGroup",
-            "BoolProperty",
-            "StringProperty",
-            "EnumProperty",
-            "CollectionProperty",
-            "PointerProperty",
-            "IntProperty",
-            "FloatProperty"
         ]
     )
 

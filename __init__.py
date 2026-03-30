@@ -12,97 +12,24 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 bl_info = {
-    "name": "EM-OptiFlow",
+    "name": "EM-OptiFlow2",
     "author": "gchibeni",
-    "description": "A workflow optimization add-on designed to automate repetitive tasks across our 3D pipeline—handling PBR texture acquisition, map conversion, resizing, compression, imports, naming standardization, and batch exports.",
+    "description": "",
     "blender": (5, 0, 0),
     "version": (0, 0, 1),
-    "location": "Properties > Scene",
-    "category": "Scene",
+    "location": "",
+    "warning": "",
+    "category": "Generic",
 }
 
-import bpy
-from bpy.props import (
-    StringProperty,
-    EnumProperty,
-    CollectionProperty,
-    PointerProperty,
-    IntProperty,
-    FloatProperty,
-    BoolProperty
-)
-from bpy.types import (
-    Scene
-)
 from . import auto_load
-from . import panels
-from . import operators
-from .functions import *
 
 auto_load.init()
 
+
 def register():
     auto_load.register()
-    Scene.show_items = BoolProperty(name="Items", default=True)
-    Scene.scene_items = CollectionProperty(type=panels.SceneItem)
-    Scene.scene_items_index = IntProperty(name="", update=isolate_items_collection)
-    Scene.scene_items_isolate = BoolProperty(name="Isolate", default=False, update=isolate_items_collection)
-    Scene.scene_items_quick_edit = BoolProperty(name="Quick Edit", default=False)
-    Scene.show_exporters = BoolProperty(name="Exporters", default=False)
-    Scene.exporters = CollectionProperty(type=panels.ExporterItem)
-    Scene.exporters_index = IntProperty(name="")
-    Scene.copyright_text = StringProperty(name="Copyright")
-    Scene.export_path = StringProperty(name="Export Path")
-    Scene.code = StringProperty(name="Code")
-    Scene.import_model = StringProperty(name="Model")
-    Scene.import_collider = StringProperty(name="Collider")
-    Scene.import_texture_folder = StringProperty(name="Texture folder")
-    Scene.import_type = EnumProperty(
-        name="Type",
-        items=[
-            ('OBJECT', "Object", ""),
-            ('TILES/MATERIALS', "Tiles/Materials", ""),
-        ],
-        default='OBJECT'
-    ) #type: ignore
-    Scene.auto_fill_file_path = StringProperty(name="File")
-    Scene.auto_fill_spreadsheet_url = StringProperty(name="Spreadsheet URL or ID", update=operators._on_spreadsheet_url_change)
-    Scene.auto_fill_sheet_tab = StringProperty(name="Sheet Tab")
-    Scene.import_texture_size = EnumProperty(
-        name="Texture Size",
-        items=[
-            ('512', "512", ""),
-            ('1024', "1024", ""),
-            ('2048', "2048", ""),
-            ('4096', "4096", ""),
-            ('8192', "8192", "")
-        ],
-        default='4096'
-    ) #type: ignore
-    bpy.app.handlers.load_post.append(load_post_start_sku_input)
-    bpy.app.timers.register(start_sku_input, first_interval=0.5)
+
 
 def unregister():
     auto_load.unregister()
-    del Scene.show_items
-    del Scene.scene_items
-    del Scene.scene_items_index
-    del Scene.scene_items_isolate
-    del Scene.scene_items_quick_edit
-    del Scene.show_exporters
-    del Scene.exporters
-    del Scene.exporters_index
-    del Scene.copyright_text
-    del Scene.export_path
-    del Scene.code
-    del Scene.import_model
-    del Scene.import_collider
-    del Scene.import_texture_folder
-    del Scene.auto_fill_file_path
-    del Scene.auto_fill_spreadsheet_url
-    del Scene.auto_fill_sheet_tab
-    del Scene.import_type
-    del Scene.import_texture_size
-    if load_post_start_sku_input in bpy.app.handlers.load_post:
-        bpy.app.handlers.load_post.remove(load_post_start_sku_input)
-

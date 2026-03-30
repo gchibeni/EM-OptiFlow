@@ -2,10 +2,10 @@ schema_version = "1.0.0"
 
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
-id = "em_optiflow"
+id = "optiflow2"
 version = "1.0.0"
-name = "EM-OptiFlow"
-tagline = "A workflow optimization add-on designed to automate repetitive tasks across our 3D pipeline—handling PBR texture acquisition, map conversion, resizing, compression, imports, naming standardization, and batch exports."
+name = "EM OptiFlow2"
+tagline = "This is another extension"
 maintainer = "gchibeni"
 # Supported types: "add-on", "theme"
 type = "add-on"

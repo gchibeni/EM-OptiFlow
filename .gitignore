@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+.claude/
 *.py[oc]
 *.py.zip
 
