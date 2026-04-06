@@ -12,7 +12,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 bl_info = {
-    "name": "EM-OptiFlow2",
+    "name": "OptiFlow",
     "author": "gchibeni",
     "description": "A workflow optimization add-on designed to automate/help on repetitive tasks across the 3D pipeline for optimizations—handling PBR texture acquisition, conversion, compression, standardization, batch imports/exports.",
     "blender": (5, 0, 0),

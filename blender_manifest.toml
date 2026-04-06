@@ -4,7 +4,7 @@ schema_version = "1.0.0"
 # Change the values according to your extension
 id = "optiflow2"
 version = "0.1.0"
-name = "EM OptiFlow2"
+name = "OptiFlow"
 tagline = "A workflow optimization add-on designed to automate/help on repetitive tasks across the 3D pipeline for optimizations—handling PBR texture acquisition, conversion, compression, standardization, batch imports/exports."
 maintainer = "gchibeni"
 # Supported types: "add-on", "theme"
@@ -40,12 +40,20 @@ license = [
 # Bundle 3rd party Python modules.
 # https://docs.blender.org/manual/en/dev/advanced/extensions/python_wheels.html
 wheels = [
+  # Python 3.11 — Blender 4.2 through 5.0
   "./wheels/pillow-12.1.1-cp311-cp311-macosx_10_10_x86_64.whl",
   "./wheels/pillow-12.1.1-cp311-cp311-macosx_11_0_arm64.whl",
   "./wheels/pillow-12.1.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
   "./wheels/pillow-12.1.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
   "./wheels/pillow-12.1.1-cp311-cp311-win_amd64.whl",
   "./wheels/pillow-12.1.1-cp311-cp311-win_arm64.whl",
+  # Python 3.13 — Blender 5.1+
+  "./wheels/pillow-12.1.1-cp313-cp313-macosx_10_13_x86_64.whl",
+  "./wheels/pillow-12.1.1-cp313-cp313-macosx_11_0_arm64.whl",
+  "./wheels/pillow-12.1.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+  "./wheels/pillow-12.1.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+  "./wheels/pillow-12.1.1-cp313-cp313-win_amd64.whl",
+  "./wheels/pillow-12.1.1-cp313-cp313-win_arm64.whl",
 ]
 
 # Optional: add-ons can list which resources they will require:
