@@ -189,19 +189,15 @@ class EXPORTERS_OT_open_folder(Operator):
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
+        from .export import resolve_export_path
         scene = context.scene
         if not scene.exporters or scene.exporters_index < 0:
             return {'CANCELLED'}
         exporter = scene.exporters[scene.exporters_index]
-        override = exporter.override_path.strip()
-        if override:
-            path = bpy.path.abspath(override)
-        else:
-            raw = scene.export_path.strip()
-            path = bpy.path.abspath(raw) if raw else ""
-        if not path or not os.path.isdir(path):
-            self.report({'ERROR'}, "Invalid path")
-            return {'CANCELLED'}
+        path = resolve_export_path(exporter, scene)
+        if not path:
+            path = os.path.expanduser("~/Documents")
+        os.makedirs(path, exist_ok=True)
         if sys.platform == 'win32':
             os.startfile(path)
         elif sys.platform == 'darwin':

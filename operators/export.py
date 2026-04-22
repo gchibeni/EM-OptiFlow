@@ -14,13 +14,32 @@ def get_copyright():
     return f"\u00a9 {date.today().year} {text}"
 
 
+def _path_root_exists(path):
+    """Return True if the drive/root of path is accessible on this OS."""
+    if not path:
+        return False
+    drive, _ = os.path.splitdrive(path)
+    if drive:
+        return os.path.exists(drive + os.sep)
+    # On Windows a path without a drive letter (e.g. /Export) is not rooted.
+    if os.name == 'nt':
+        return False
+    return True
+
+
 def resolve_export_path(exporter, scene):
     """Determine the base export directory for an exporter."""
-    override = exporter.override_path.strip()
-    path = override if override else scene.export_path.strip()
-    if path:
-        return bpy.path.abspath(path)
     blend_path = bpy.data.filepath
+    override   = exporter.override_path.strip()
+    raw        = override if override else scene.export_path.strip()
+    if raw:
+        # Relative paths (//...) require a saved blend file to be meaningful.
+        if raw.startswith("//") and not blend_path:
+            pass
+        else:
+            resolved = bpy.path.abspath(raw)
+            if _path_root_exists(resolved):
+                return resolved
     if blend_path:
         return os.path.dirname(blend_path)
     return os.path.join(os.path.expanduser("~"), "Documents")

@@ -185,11 +185,7 @@ class EXPORTERS_UL_list(UIList):
 
     def _draw_active_buttons(self, row, item, scene):
         """Draw action buttons for the active exporter row."""
-        has_path = bool(item.override_path.strip()) or bool(scene.export_path.strip())
-        if has_path:
-            row.operator("exporters.open_folder", text="", icon='FOLDER_REDIRECT', emboss=False)
-        else:
-            row.label(text="", icon='BLANK1')
+        row.operator("exporters.open_folder", text="", icon='FOLDER_REDIRECT', emboss=False)
         row.separator(factor=2.8)
         row.operator("exporters.edit",      text="", icon='MODIFIER_ON', emboss=False)
         row.operator("exporters.duplicate", text="", icon='DUPLICATE',   emboss=False)

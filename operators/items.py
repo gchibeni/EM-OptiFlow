@@ -1,7 +1,7 @@
 import bpy
 import os
 from bpy.types import Operator
-from bpy.props import StringProperty, EnumProperty, IntProperty
+from bpy.props import StringProperty, EnumProperty, IntProperty, BoolProperty
 from ..core import constants, helpers
 
 # region Placeholder
@@ -287,8 +287,14 @@ class OPT_OT_delete(Operator):
     """Delete the selected group or item and its exclusive objects."""
     bl_idname  = "optiflow.delete"
     bl_label   = "Delete"
-    bl_description = "Delete the selected item.\nExclusive referenced objects will also be deleted."
+    bl_description = "Delete the selected item.\nExclusive referenced objects will also be deleted.\n\nCtrl+Click: delete item only, keep objects in scene."
     bl_options = {'UNDO'}
+
+    keep_objects: BoolProperty(default=False, options={'SKIP_SAVE'})  # type: ignore
+
+    def invoke(self, context, event):
+        self.keep_objects = event.ctrl
+        return self.execute(context)
 
     def execute(self, context):
         scene = context.scene
@@ -310,29 +316,34 @@ class OPT_OT_delete(Operator):
         return {'FINISHED'}
 
     def _delete_group(self, groups, gi):
-        """Remove a group and delete its exclusive scene objects."""
+        """Remove a group and optionally delete its exclusive scene objects."""
         src = groups[gi]
         to_delete = {}
-        for item in src.items:
-            for ref in item.objects:
-                if ref.object is not None:
-                    to_delete[ref.object.as_pointer()] = ref.object
+        if not self.keep_objects:
+            for item in src.items:
+                for ref in item.objects:
+                    if ref.object is not None:
+                        to_delete[ref.object.as_pointer()] = ref.object
         referenced = helpers.collect_referenced_ptrs(groups, skip_gi=gi)
         groups.remove(gi)
-        helpers.delete_unreferenced(to_delete, referenced)
+        if not self.keep_objects:
+            helpers.delete_unreferenced(to_delete, referenced)
 
     def _delete_item(self, groups, gi, ii):
-        """Remove an item and delete its exclusive scene objects."""
+        """Remove an item and optionally delete its exclusive scene objects."""
         item = groups[gi].items[ii]
-        to_delete = {
-            ref.object.as_pointer(): ref.object
-            for ref in item.objects if ref.object is not None
-        }
+        to_delete = {}
+        if not self.keep_objects:
+            to_delete = {
+                ref.object.as_pointer(): ref.object
+                for ref in item.objects if ref.object is not None
+            }
         referenced = helpers.collect_referenced_ptrs(
             groups, skip_item_ptr=item.as_pointer(),
         )
         groups[gi].items.remove(ii)
-        helpers.delete_unreferenced(to_delete, referenced)
+        if not self.keep_objects:
+            helpers.delete_unreferenced(to_delete, referenced)
 
 # endregion
 
