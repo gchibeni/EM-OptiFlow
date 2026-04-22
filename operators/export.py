@@ -65,8 +65,10 @@ def export_file(filepath, exporter):
                 export_format='GLB' if exporter.embed_materials else 'GLTF_SEPARATE',
                 check_existing=False,
                 export_animations=exporter.animations,
-                export_jpeg_quality=70,
-                export_image_format='JPEG',
+                export_tangents=exporter.tangents,
+                export_image_format=exporter.images_type,
+                export_jpeg_quality=exporter.quality,
+                export_image_quality=exporter.quality,
                 export_materials='EXPORT',
                 export_copyright=get_copyright(),
             )
@@ -89,6 +91,9 @@ def export_file(filepath, exporter):
                 global_scale=exporter.scale,
                 apply_modifiers=exporter.apply_transforms,
                 export_materials=exporter.embed_materials,
+                export_animation=exporter.animations,
+                start_frame=exporter.anim_frame_start,
+                end_frame=exporter.anim_frame_end,
             )
 
 

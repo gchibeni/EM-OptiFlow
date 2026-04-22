@@ -4,7 +4,8 @@ from bpy.props import (
     StringProperty, EnumProperty, CollectionProperty,
     PointerProperty, IntProperty, FloatProperty, BoolProperty,
 )
-from .constants import FLAT_TYPE, ITEM_TYPE, MESH_TYPE, EXPORTER_TYPE
+
+from .constants import FLAT_TYPE, ITEM_TYPE, MESH_TYPE, EXPORTER_TYPE, GLTF_IMAGE_TYPE
 from . import helpers
 
 # region Guards
@@ -73,47 +74,30 @@ def _on_item_name_update(self, context):
     _rename_item_objects(objs, clean_name)
 
 
+_INVISIBLE_PREFIXES = {"COL", "PLACER", "SNAP", "GUIDE"}
+
 def _rename_item_objects(objs, clean_name):
-    """Apply naming convention based on object count and existing prefixes."""
-    if len(objs) == 1:
-        prefix = helpers.get_prefix(objs[0]) or "MESH"
-        helpers.rename_obj(objs[0], f"{prefix}_{clean_name}")
+    """Rename objects as PREFIX_name, or PREFIX_name_N when the same prefix appears more than once.
+    Objects whose prefix is in _INVISIBLE_PREFIXES also get the ColMat invisible material applied.
+    """
+    from collections import defaultdict
 
-    elif len(objs) == 2:
-        prefixes = [(obj, helpers.get_prefix(obj)) for obj in objs]
-        col_obj  = next((obj for obj, p in prefixes if p == "COL"), None)
-        if col_obj:
-            mesh_obj    = next(obj for obj in objs if obj != col_obj)
-            mesh_prefix = helpers.get_prefix(mesh_obj)
-            if mesh_prefix == "COL":
-                mesh_prefix = "MESH"
-            helpers.rename_obj(col_obj, f"COL_{clean_name}")
-            helpers.rename_obj(mesh_obj, f"{mesh_prefix or 'MESH'}_{clean_name}")
+    prefix_groups = defaultdict(list)
+    for obj in objs:
+        prefix = helpers.get_prefix(obj) or "MESH"
+        prefix_groups[prefix].append(obj)
+
+    for prefix, group in prefix_groups.items():
+        apply_invisible = prefix in _INVISIBLE_PREFIXES
+        if len(group) == 1:
+            helpers.rename_obj(group[0], f"{prefix}_{clean_name}")
+            if apply_invisible:
+                helpers.set_invisible_mat(group[0], "ColMat")
         else:
-            sorted_objs = sorted(objs, key=helpers.get_vertex_count)
-            low, high   = sorted_objs[0], sorted_objs[1]
-            prefix_low  = helpers.get_prefix(low) or "COL"
-            prefix_high = helpers.get_prefix(high) or "MESH"
-            helpers.rename_obj(low, f"{prefix_low}_{clean_name}")
-            helpers.rename_obj(high, f"{prefix_high}_{clean_name}")
-
-    else:
-        sorted_objs = sorted(objs, key=helpers.get_vertex_count)
-        col_obj = next(
-            (obj for obj in sorted_objs if helpers.get_prefix(obj) == "COL"),
-            sorted_objs[0],
-        )
-        helpers.rename_obj(col_obj, f"COL_{clean_name}")
-        counter = 1
-        for obj in sorted_objs:
-            if obj == col_obj:
-                continue
-            prefix = helpers.get_prefix(obj)
-            if prefix == "COL":
-                prefix = "MESH"
-            prefix = prefix or "MESH"
-            helpers.rename_obj(obj, f"{prefix}_{clean_name}_{counter}")
-            counter += 1
+            for i, obj in enumerate(group, start=1):
+                helpers.rename_obj(obj, f"{prefix}_{clean_name}_{i}")
+                if apply_invisible:
+                    helpers.set_invisible_mat(obj, "ColMat")
 
 
 def _on_group_name_update(self, context):
@@ -233,6 +217,21 @@ class Exporter(PropertyGroup):
     )  # type: ignore
     animations: BoolProperty(
         name="Animations", default=True,
+    )  # type: ignore
+    tangents: BoolProperty(
+        name="Tangents", default=True,
+    )  # type: ignore
+    images_type: EnumProperty(
+        name="Images Type", items=GLTF_IMAGE_TYPE, default='AUTO',
+    )  # type: ignore
+    quality: IntProperty(
+        name="Quality", default=100, min=50, max=100, subtype='PERCENTAGE',
+    )  # type: ignore
+    anim_frame_start: IntProperty(
+        name="Start", default=1,
+    )  # type: ignore
+    anim_frame_end: IntProperty(
+        name="End", default=250,
     )  # type: ignore
 
 # endregion

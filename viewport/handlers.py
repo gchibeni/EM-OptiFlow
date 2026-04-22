@@ -179,6 +179,7 @@ def register():
     Scene.exporters             = CollectionProperty(type=Exporter, options={'HIDDEN'})
     Scene.exporters_index       = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})
     Scene.show_exporters        = BoolProperty(name="Show Exporters", default=False)
+    Scene.optiflow_origin_wip   = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
     bpy.types.WindowManager.optiflow_ctrl_held = BoolProperty(
         default=False, options={'HIDDEN', 'SKIP_SAVE'},
     )
@@ -201,6 +202,7 @@ def unregister():
     for attr in (
         "show_items", "optiflow_groups", "optiflow_flat_entries", "optiflow_flat_index",
         "export_path", "copyright_text", "exporters", "exporters_index", "show_exporters",
+        "optiflow_origin_wip",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)

@@ -258,6 +258,44 @@ def tag_redraw_all(context):
 
 # endregion
 
+# region Materials
+
+def set_invisible_mat(obj, mat_name):
+    """Assign a fully-transparent Principled material to obj and set display to Wire.
+
+    If a material with mat_name already exists it is reused, but its node tree
+    is always rebuilt to guarantee it contains only a Principled BSDF with
+    Alpha = 0 connected to a Material Output.
+    """
+    mat = bpy.data.materials.get(mat_name)
+    if mat is None:
+        mat = bpy.data.materials.new(name=mat_name)
+
+    mat.use_nodes = True
+    mat.blend_method = 'BLEND'
+
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    nodes.clear()
+
+    bsdf = nodes.new('ShaderNodeBsdfPrincipled')
+    out  = nodes.new('ShaderNodeOutputMaterial')
+
+    bsdf.inputs['Alpha'].default_value = 0.0
+    bsdf.location = (0, 0)
+    out.location  = (300, 0)
+
+    links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
+
+    if obj.data.materials:
+        obj.data.materials[0] = mat
+    else:
+        obj.data.materials.append(mat)
+
+    obj.display_type = 'WIRE'
+
+# endregion
+
 # region Data
 
 def purge_unused_data():

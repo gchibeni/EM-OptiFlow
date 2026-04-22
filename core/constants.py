@@ -1,6 +1,6 @@
 # region Prefixes
 
-KNOWN_PREFIXES = ("MESH", "COL", "PLACER", "SNAP")
+KNOWN_PREFIXES = ("MESH", "COL", "PLACER", "SNAP", "GUIDE")
 
 # endregion
 
@@ -27,6 +27,12 @@ EXPORTER_TYPE = [
     ('GLTF', "glTF", ""),
     ('FBX', "FBX", ""),
     ('OBJ', "OBJ", ""),
+]
+
+GLTF_IMAGE_TYPE = [
+    ('AUTO', "Automatic", ""),
+    ('JPEG', "Jpeg",      ""),
+    ('WEBP', "Webp",      ""),
 ]
 
 TEXTURE_SIZES = [

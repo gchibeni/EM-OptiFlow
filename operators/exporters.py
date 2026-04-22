@@ -3,20 +3,25 @@ import os
 import sys
 import subprocess
 from bpy.types import Operator
-from bpy.props import StringProperty, EnumProperty, BoolProperty
+from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty
 from ..core import constants
 
 # region Helpers
 
 def _copy_exporter_props(src, dst):
     """Copy all properties from one exporter to another."""
-    dst.exporter_type   = src.exporter_type
-    dst.override_path   = src.override_path
-    dst.prefix          = src.prefix
-    dst.scale           = src.scale
+    dst.exporter_type    = src.exporter_type
+    dst.override_path    = src.override_path
+    dst.prefix           = src.prefix
+    dst.scale            = src.scale
     dst.apply_transforms = src.apply_transforms
-    dst.embed_materials = src.embed_materials
-    dst.animations      = src.animations
+    dst.embed_materials  = src.embed_materials
+    dst.animations       = src.animations
+    dst.tangents          = src.tangents
+    dst.images_type       = src.images_type
+    dst.quality           = src.quality
+    dst.anim_frame_start  = src.anim_frame_start
+    dst.anim_frame_end    = src.anim_frame_end
 
 # endregion
 
@@ -105,6 +110,11 @@ class EXPORTERS_OT_edit(Operator):
     edit_prefix:          StringProperty(name="Prefix")  # type: ignore
     edit_embed_materials: BoolProperty(name="Embed Materials", default=True)  # type: ignore
     edit_animations:      BoolProperty(name="Animations", default=True)  # type: ignore
+    edit_tangents:          BoolProperty(name="Tangents", default=True)  # type: ignore
+    edit_images_type:       EnumProperty(name="Images Type", items=constants.GLTF_IMAGE_TYPE, default='AUTO')  # type: ignore
+    edit_quality:           IntProperty(name="Quality", default=100, min=50, max=100, subtype='PERCENTAGE')  # type: ignore
+    edit_anim_frame_start:  IntProperty(name="Start", default=1)  # type: ignore
+    edit_anim_frame_end:    IntProperty(name="End", default=250)  # type: ignore
 
     def invoke(self, context, event):
         scene = context.scene
@@ -116,6 +126,11 @@ class EXPORTERS_OT_edit(Operator):
         self.edit_prefix          = src.prefix
         self.edit_embed_materials = src.embed_materials
         self.edit_animations      = src.animations
+        self.edit_tangents         = src.tangents
+        self.edit_images_type      = src.images_type
+        self.edit_quality          = src.quality
+        self.edit_anim_frame_start = src.anim_frame_start
+        self.edit_anim_frame_end   = src.anim_frame_end
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):
@@ -125,9 +140,26 @@ class EXPORTERS_OT_edit(Operator):
         dir_input(layout, self, "Override Path:", "edit_override_path")
         prop_input(layout, self, "Prefix:", "edit_prefix")
         layout.separator(type='LINE')
-        prop_input(layout, self, "Embed Materials:", "edit_embed_materials")
-        if self.edit_exporter_type != 'OBJ':
-            prop_input(layout, self, "Animations:", "edit_animations")
+        split = layout.split(factor=0.23)
+        split.label(text="Data:")
+        row = split.row(align=True)
+        row.prop(self, "edit_embed_materials", text="Embed Materials", toggle=True)
+        row.prop(self, "edit_animations", text="Animations", toggle=True)
+        if self.edit_exporter_type == 'OBJ' and self.edit_animations:
+            split = layout.split(factor=0.23)
+            split.label(text="Frame Range:")
+            row = split.row(align=True)
+            row.prop(self, "edit_anim_frame_start", text="Start")
+            row.prop(self, "edit_anim_frame_end", text="End")
+        if self.edit_exporter_type == 'GLTF':
+            row.prop(self, "edit_tangents", text="Tangents", toggle=True)
+            split = layout.split(factor=0.23)
+            split.label(text="Images:")
+            row = split.row(align=True)
+            row.prop(self, "edit_images_type", expand=True)
+            split = layout.split(factor=0.23)
+            split.label(text="Quality:")
+            split.prop(self, "edit_quality", text="", slider=True)
         layout.separator(type='LINE')
 
     def execute(self, context):
@@ -138,6 +170,11 @@ class EXPORTERS_OT_edit(Operator):
         exporter.prefix          = self.edit_prefix
         exporter.embed_materials = self.edit_embed_materials
         exporter.animations      = self.edit_animations
+        exporter.tangents          = self.edit_tangents
+        exporter.images_type       = self.edit_images_type
+        exporter.quality           = self.edit_quality
+        exporter.anim_frame_start  = self.edit_anim_frame_start
+        exporter.anim_frame_end    = self.edit_anim_frame_end
         return {'FINISHED'}
 
 # endregion
