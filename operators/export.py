@@ -84,6 +84,7 @@ def export_file(filepath, exporter):
                 export_format='GLB' if exporter.embed_materials else 'GLTF_SEPARATE',
                 check_existing=False,
                 export_animations=exporter.animations,
+                export_animation_mode='NLA_TRACKS',
                 export_tangents=exporter.tangents,
                 export_image_format=exporter.images_type,
                 export_jpeg_quality=exporter.quality,
@@ -167,6 +168,19 @@ def export_all(scene):
         for group in scene.optiflow_groups:
             export_group(group, exporter, scene)
 
+
+def has_ngons(scene):
+    """Return True if any mesh object in any item has a face with 5+ vertices."""
+    for group in scene.optiflow_groups:
+        for item in group.items:
+            for ref in item.objects:
+                if ref.object is None or ref.object.type != 'MESH':
+                    continue
+                for poly in ref.object.data.polygons:
+                    if poly.loop_total > 4:
+                        return True
+    return False
+
 # endregion
 
 # region Confirm
@@ -181,11 +195,13 @@ class OPT_OT_export_confirm(Operator):
     _files          = []
     _overwrite      = []
     _exporters_info = []
+    _ngons_found    = False
 
     def invoke(self, context, event):
         scene = context.scene
         self._files, self._exporters_info = collect_export_files(scene)
-        self._overwrite = [f for f, exists in self._files if exists]
+        self._overwrite  = [f for f, exists in self._files if exists]
+        self._ngons_found = has_ngons(scene)
         return context.window_manager.invoke_props_dialog(self, width=450)
 
     def draw(self, context):
@@ -207,6 +223,14 @@ class OPT_OT_export_confirm(Operator):
             row       = layout.row()
             row.alert = True
             row.label(text=f"{replaced} existing file(s) will be replaced.")
+        if self._ngons_found:
+            layout.separator(type='LINE')
+            row       = layout.row()
+            row.alert = True
+            row.label(
+                text="Meshes contain N-gons, which may lead to export issues or visual artifacts.",
+                icon='ERROR',
+            )
         layout.separator(type='LINE')
 
     def execute(self, context):
