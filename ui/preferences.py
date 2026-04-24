@@ -188,9 +188,9 @@ def _sync_preset_entries(prefs):
 class OPTIFLOW_AddonPreferences(AddonPreferences):
     bl_idname = addon_name
 
-    presets_expanded: BoolProperty(name="Presets", default=False)  # type: ignore
-    preset_entries:   CollectionProperty(type=PresetEntry)          # type: ignore
-    preset_index:     IntProperty(default=0)                        # type: ignore
+    presets_expanded: BoolProperty(name="Presets", default=False) # type: ignore
+    preset_entries:   CollectionProperty(type=PresetEntry) # type: ignore
+    preset_index:     IntProperty(default=0, name="Preset") # type: ignore
 
     def draw(self, context):
         layout = self.layout

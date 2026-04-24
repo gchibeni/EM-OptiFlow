@@ -15,7 +15,7 @@ FLAT_TYPE = [
 ]
 
 ITEM_TYPE = [
-    ('OBJECT',        "Object",        ""),
+    ('OBJECT', "Object", ""),
     ('PRESET', "Preset", ""),
 ]
 

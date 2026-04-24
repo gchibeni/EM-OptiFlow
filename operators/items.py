@@ -146,11 +146,11 @@ class OPT_OT_add_item(Operator):
     test: StringProperty() # type: ignore
     item_mode: EnumProperty(
         name="Mode",
-        items=[
-            ('OBJECT', "Object", ""),
-            ('PRESET',  "Preset",  ""),
-        ],
+        items=constants.ITEM_TYPE,
         default='OBJECT',
+    )  # type: ignore
+    item_preset: EnumProperty(
+        name="Mesh", items=lambda self, ctx: constants.MESH_TYPE,
     )  # type: ignore
     preview_image_name: StringProperty(name="Texture", default="")  # type: ignore
 
@@ -166,7 +166,7 @@ class OPT_OT_add_item(Operator):
             dir_input(layout, self, "Object:", "test")
             dir_input(layout, self, "Collider:", "test")
         elif self.item_mode == "PRESET":
-            prop_input(layout, self, "Preset:", "test")
+            prop_input(layout, self, "Mesh:", "item_preset")
         layout.separator(type='LINE')
         path_input(layout, self, "Textures:", "test", filter_glob="*.png;*.jpg;*.jpeg;*.webp")
 
@@ -203,7 +203,7 @@ class OPT_OT_edit_item(Operator):
     edit_item_type: EnumProperty(
         name="Type", items=constants.ITEM_TYPE,
     )  # type: ignore
-    edit_tile_mesh: EnumProperty(
+    edit_preset: EnumProperty(
         name="Mesh", items=lambda self, ctx: constants.MESH_TYPE,
     )  # type: ignore
 
@@ -216,7 +216,7 @@ class OPT_OT_edit_item(Operator):
         self.edit_name      = item.name
         self.edit_alias     = item.alias
         self.edit_item_type = item.item_type
-        self.edit_tile_mesh = item.tile_mesh
+        self.edit_preset = item.preset
         if not item.objects or item.objects[-1].object is not None:
             item.objects.add()
         return context.window_manager.invoke_props_dialog(self, width=420)
@@ -231,7 +231,7 @@ class OPT_OT_edit_item(Operator):
         prop_input(layout, self, "Type:", "edit_item_type")
         if self.edit_item_type == 'PRESET':
             layout.separator(type='LINE')
-            prop_input(layout, self, "Mesh:", "edit_tile_mesh")
+            prop_input(layout, self, "Mesh:", "edit_preset")
         layout.separator(type='LINE')
         layout.label(text="Objects:")
         box = layout.box()
@@ -251,14 +251,13 @@ class OPT_OT_edit_item(Operator):
         fe    = helpers.get_active_entry(scene)
         item  = scene.optiflow_groups[fe.group_index].items[fe.item_index]
         item.item_type = self.edit_item_type
-        item.tile_mesh = self.edit_tile_mesh
+        item.preset = self.edit_preset
         item.name      = self.edit_name
         item.alias     = self.edit_alias
         if self.edit_item_type == 'PRESET':
-            _apply_tile_mesh(context, item, self.edit_tile_mesh)
+            _apply_preset(context, item, self.edit_preset)
         helpers.rebuild_flat_entries(scene)
         return {'FINISHED'}
-
 
 class OPT_OT_edit_item_remove_object(Operator):
     """Unassign an object reference from an item."""
@@ -401,9 +400,9 @@ class OPT_OT_delete(Operator):
 
 # region Mesh Templates
 
-def _import_template_mesh(tile_mesh_type):
+def _import_template_mesh(preset_type):
     """Import the FBX template for a mesh type, return the Mesh datablock."""
-    mesh_filename = f"MESH_{tile_mesh_type}.fbx"
+    mesh_filename = f"MESH_{preset_type}.fbx"
     addon_dir     = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     mesh_path     = os.path.join(addon_dir, "meshes", mesh_filename)
     if not os.path.isfile(mesh_path):
@@ -424,9 +423,9 @@ def _import_template_mesh(tile_mesh_type):
     return template_mesh
 
 
-def _apply_tile_mesh(context, item, tile_mesh_type):
+def _apply_preset(context, item, preset_type):
     """Swap mesh data for item objects to match the selected mesh type."""
-    template_mesh = _import_template_mesh(tile_mesh_type)
+    template_mesh = _import_template_mesh(preset_type)
     if template_mesh is None:
         return
     mesh_refs = [

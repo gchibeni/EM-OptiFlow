@@ -199,7 +199,7 @@ def move_item_between_groups(scene, src_gi, src_ii, dst_gi, dst_ii):
 def clone_item_props(src, dst):
     """Copy item properties from src to dst (excluding name and objects)."""
     dst.item_type = src.item_type
-    dst.tile_mesh = src.tile_mesh
+    dst.preset = src.preset
     dst.alias     = src.alias
     dst.selected  = src.selected
 

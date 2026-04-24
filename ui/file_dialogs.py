@@ -100,8 +100,8 @@ def _force_redraw(context):
 class UI_OT_select_dirpath(Operator):
     """File browser dialog for selecting a directory."""
     bl_idname  = "ui.select_dirpath"
-    bl_label   = "Select Directory"
-    bl_description = "Specify the target directory path"
+    bl_label   = "Select Folder"
+    bl_description = "Specify the target folder path"
     bl_options = {'REGISTER', 'INTERNAL'}
 
     directory:   StringProperty(options={'HIDDEN'})  # type: ignore
