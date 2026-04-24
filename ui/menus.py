@@ -21,7 +21,7 @@ class OPT_MT_add_menu(Menu):
     def draw(self, context):
         layout = self.layout
         layout.operator("optiflow.add_group", text="Group", icon="COLLECTION_NEW")
-        layout.operator("optiflow.wip_popup", text="Item(s)", icon="FILE_NEW")
+        layout.operator("optiflow.add_item", text="Item(s)", icon="FILE_NEW")
         layout.separator(type='LINE')
         layout.operator("optiflow.add_empty", text="Empty", icon="FILE_NEW")
 

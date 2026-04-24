@@ -3,6 +3,7 @@ import os
 from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty, IntProperty, BoolProperty
 from ..core import constants, helpers
+from ..ui.file_dialogs import dir_input, prop_input, file_input, path_input
 
 # region Placeholder
 
@@ -14,7 +15,6 @@ class placeholder(Operator):
 
     def execute(self, context):
         return {'FINISHED'}
-
 
 class OPT_OT_wip_popup(Operator):
     """Generic work in progress dialog."""
@@ -31,6 +31,7 @@ class OPT_OT_wip_popup(Operator):
 
     def execute(self, context):
         return {'FINISHED'}
+
 
 # endregion
 
@@ -50,7 +51,7 @@ class OPT_OT_add_group(Operator):
         n = 1
         while f"NEW_GROUP_{n}" in existing:
             n += 1
-        name        = f"New Group {n}"
+        name        = f"NEW_GROUP_{n}"
         g           = groups.add()
         g.name      = name
         g.prev_name = name
@@ -123,16 +124,67 @@ class OPT_OT_add_empty(Operator):
         group, gi = helpers.ensure_default_group(scene)
         existing = {it.name for it in group.items}
         n = 1
-        while f"New Object {n}" in existing:
+        while f"NEW_OBJECT_{n}" in existing:
             n += 1
         it           = group.items.add()
-        it.name      = f"New Object {n}"
+        it.name      = f"NEW_OBJECT_{n}"
         it.item_type = 'OBJECT'
         if not group.expanded:
             group.expanded = True
         new_ii = len(group.items) - 1
         helpers.rebuild_and_select(scene, gi, new_ii)
         helpers.tag_redraw_all(context)
+        return {'FINISHED'}
+
+class OPT_OT_add_item(Operator):
+    """Create an item in the current group."""
+    bl_idname  = "optiflow.add_item"
+    bl_label   = "Add Item"
+    bl_description = "Add a new imported item"
+    bl_options = {'INTERNAL'}
+
+    test: StringProperty() # type: ignore
+    item_mode: EnumProperty(
+        name="Mode",
+        items=[
+            ('OBJECT', "Object", ""),
+            ('PRESET',  "Preset",  ""),
+        ],
+        default='OBJECT',
+    )  # type: ignore
+    preview_image_name: StringProperty(name="Texture", default="")  # type: ignore
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=420)
+
+    def draw(self, context):
+        layout = self.layout
+        row = layout.row(align=True)
+        row.prop(self, "item_mode", expand=True)
+        layout.separator(type='LINE')
+        if self.item_mode == "OBJECT":
+            dir_input(layout, self, "Object:", "test")
+            dir_input(layout, self, "Collider:", "test")
+        elif self.item_mode == "PRESET":
+            prop_input(layout, self, "Preset:", "test")
+        layout.separator(type='LINE')
+        path_input(layout, self, "Textures:", "test", filter_glob="*.png;*.jpg;*.jpeg;*.webp")
+
+        layout.prop_search(self, "preview_image_name", bpy.data, "images", text="Texture")
+        img = bpy.data.images.get(self.preview_image_name)
+        if img:
+            box = layout.box()
+            row = box.row()
+            row.alignment = 'LEFT'
+            row.template_icon(icon_value=img.preview.icon_id, scale=1.0)
+            row.label(text="woo")
+        else:
+            box = layout.box()
+            col = box.column()
+            col.label(text="No texture selected", icon='IMAGE_DATA')
+        layout.separator(type='LINE')
+
+    def execute(self, context):
         return {'FINISHED'}
 
 # endregion
@@ -152,7 +204,7 @@ class OPT_OT_edit_item(Operator):
         name="Type", items=constants.ITEM_TYPE,
     )  # type: ignore
     edit_tile_mesh: EnumProperty(
-        name="Mesh", items=constants.MESH_TYPE,
+        name="Mesh", items=lambda self, ctx: constants.MESH_TYPE,
     )  # type: ignore
 
     def invoke(self, context, event):
@@ -167,7 +219,7 @@ class OPT_OT_edit_item(Operator):
         self.edit_tile_mesh = item.tile_mesh
         if not item.objects or item.objects[-1].object is not None:
             item.objects.add()
-        return context.window_manager.invoke_props_dialog(self, width=300)
+        return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):
         from ..ui.file_dialogs import prop_input
@@ -177,7 +229,7 @@ class OPT_OT_edit_item(Operator):
         prop_input(layout, self, "Name:", "edit_name")
         prop_input(layout, self, "Alias:", "edit_alias")
         prop_input(layout, self, "Type:", "edit_item_type")
-        if self.edit_item_type == 'TILE/MATERIAL':
+        if self.edit_item_type == 'PRESET':
             layout.separator(type='LINE')
             prop_input(layout, self, "Mesh:", "edit_tile_mesh")
         layout.separator(type='LINE')
@@ -202,7 +254,7 @@ class OPT_OT_edit_item(Operator):
         item.tile_mesh = self.edit_tile_mesh
         item.name      = self.edit_name
         item.alias     = self.edit_alias
-        if self.edit_item_type == 'TILE/MATERIAL':
+        if self.edit_item_type == 'PRESET':
             _apply_tile_mesh(context, item, self.edit_tile_mesh)
         helpers.rebuild_flat_entries(scene)
         return {'FINISHED'}

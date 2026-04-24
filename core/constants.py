@@ -1,3 +1,5 @@
+import os
+
 # region Prefixes
 
 KNOWN_PREFIXES = ("MESH", "COL", "PLACER", "SNAP", "GUIDE")
@@ -9,19 +11,31 @@ KNOWN_PREFIXES = ("MESH", "COL", "PLACER", "SNAP", "GUIDE")
 FLAT_TYPE = [
     ('GROUP',         "Group",         "GROUP"),
     ('OBJECT',        "Object",        "META_CUBE"),
-    ('TILE/MATERIAL', "Tile/Material", "MESH_GRID"),
+    ('PRESET', "Preset", "MESH_GRID"),
 ]
 
 ITEM_TYPE = [
     ('OBJECT',        "Object",        ""),
-    ('TILE/MATERIAL', "Tile/Material", ""),
+    ('PRESET', "Preset", ""),
 ]
 
-MESH_TYPE = [
-    ('TILE', "Tile", ""),
-    ('BULLNOSE', "Bullnose", ""),
-    ('COVEBASE', "Covebase", ""),
-]
+def _build_mesh_type():
+    meshes_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "meshes")
+    if not os.path.isdir(meshes_dir):
+        return [('TILE', "Tile", "")]
+    entries = []
+    for fname in sorted(os.listdir(meshes_dir)):
+        if fname.startswith("MESH_") and fname.upper().endswith(".FBX"):
+            key   = fname[5:fname.upper().rfind(".FBX")]
+            label = key.replace("_", " ").title()
+            entries.append((key, label, ""))
+    entries.sort(key=lambda e: (e[0] != 'TILE', e[0]))
+    return entries
+
+MESH_TYPE = _build_mesh_type()
+
+def refresh_mesh_type():
+    MESH_TYPE[:] = _build_mesh_type()
 
 EXPORTER_TYPE = [
     ('GLTF', "glTF", ""),

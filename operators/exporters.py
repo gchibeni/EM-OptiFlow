@@ -5,6 +5,7 @@ import subprocess
 from bpy.types import Operator
 from bpy.props import StringProperty, EnumProperty, BoolProperty, IntProperty
 from ..core import constants
+from ..ui.file_dialogs import dir_input, prop_input
 
 # region Helpers
 
@@ -134,7 +135,6 @@ class EXPORTERS_OT_edit(Operator):
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):
-        from ..ui.file_dialogs import dir_input, prop_input
         layout = self.layout
         prop_input(layout, self, "Exporter:", "edit_exporter_type")
         dir_input(layout, self, "Override Path:", "edit_override_path")

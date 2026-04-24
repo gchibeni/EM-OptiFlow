@@ -1,7 +1,7 @@
 import bpy
 import os
 from bpy.types import Operator, UILayout
-from bpy.props import StringProperty
+from bpy.props import StringProperty, CollectionProperty
 
 # region Variables
 
@@ -175,6 +175,47 @@ class UI_OT_select_filepath(Operator):
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
+class UI_OT_select_multipaths(Operator):
+    """File browser dialog for selecting multiple files."""
+    bl_idname  = "ui.select_multipaths"
+    bl_label   = "Select Folder/Files"
+    bl_description = "Select folder or files"
+    bl_options = {'REGISTER', 'INTERNAL'}
+
+    directory:   StringProperty(subtype='DIR_PATH', options={'HIDDEN'})  # type: ignore
+    files:       CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    target_prop: StringProperty(options={'HIDDEN'})  # type: ignore
+    data_path:   StringProperty(options={'HIDDEN'})  # type: ignore
+    filter_glob: StringProperty(default="*", options={'HIDDEN'})  # type: ignore
+
+    def execute(self, context):
+        global _last_dir
+        target  = _resolve_target(context, self.data_path)
+        dir_abs = bpy.path.abspath(self.directory)
+        _last_dir = dir_abs
+        file_names = [
+            f.name for f in self.files
+            if f.name and os.path.isfile(os.path.join(dir_abs, f.name))
+        ]
+        if file_names:
+            result = "|".join(
+                _to_relative_path(os.path.join(dir_abs, name))
+                for name in file_names
+            )
+        else:
+            result = _to_relative_path(self.directory)
+        setattr(target, self.target_prop, result)
+        _force_redraw(context)
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        global _last_mouse_pos
+        _last_mouse_pos = (event.mouse_x, event.mouse_y)
+        target = _resolve_target(context, self.data_path)
+        self.directory = _get_start_path(target, self.target_prop)
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
 # endregion
 
 # region Helpers
@@ -214,6 +255,24 @@ def file_input(layout, context, label, target_prop, file_types=""):
     op = row.operator("ui.select_filepath", text="", icon='FILE_FOLDER')
     op.target_prop = target_prop
     op.file_types  = file_types
+    try:
+        op.data_path = context.path_from_id()
+    except (ValueError, AttributeError):
+        op.data_path = _register_direct_target(context)
+
+
+def path_input(layout, context, label, target_prop, filter_glob="*"):
+    """Draw a path input row that accepts a directory or multiple files.
+    Selecting files stores them as a '|'-joined string; confirming without
+    selecting files stores the current directory path.
+    filter_glob filters visible files, e.g. '*.png;*.jpg' (dirs always shown)."""
+    split = layout.split(factor=0.23)
+    split.label(text=label)
+    row = split.row(align=True)
+    row.prop(context, target_prop, text="")
+    op = row.operator("ui.select_multipaths", text="", icon='FILE_FOLDER')
+    op.target_prop  = target_prop
+    op.filter_glob  = filter_glob
     try:
         op.data_path = context.path_from_id()
     except (ValueError, AttributeError):

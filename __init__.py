@@ -24,6 +24,8 @@ bl_info = {
 
 from . import auto_load
 
+addon_name = __name__
+
 auto_load.init()
 
 

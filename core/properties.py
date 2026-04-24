@@ -176,7 +176,7 @@ class Item(PropertyGroup):
     alias:     StringProperty(name="Alias")  # type: ignore
     selected:  BoolProperty(default=False)  # type: ignore
     item_type: EnumProperty(name="Type", items=ITEM_TYPE)  # type: ignore
-    tile_mesh: EnumProperty(name="Mesh", items=MESH_TYPE)  # type: ignore
+    tile_mesh: EnumProperty(name="Mesh", items=lambda self, ctx: MESH_TYPE)  # type: ignore
     objects:   CollectionProperty(type=ObjectRef)  # type: ignore
 
 
