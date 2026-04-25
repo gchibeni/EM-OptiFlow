@@ -1,9 +1,245 @@
 import bpy
 import os
-from bpy.types import Operator
-from bpy.props import StringProperty, EnumProperty, IntProperty, BoolProperty
+from bpy.types import Operator, PropertyGroup, UIList
+from bpy.props import StringProperty, EnumProperty, IntProperty, BoolProperty, FloatProperty, CollectionProperty
 from ..core import constants, helpers
 from ..ui.file_dialogs import dir_input, prop_input, file_input, path_input
+
+# region Textures
+
+_SUPPORTED_TEX_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.webp'})
+
+# Temporary storage while OPT_OT_add_item is open.
+# Structure: { group_name: [absolute_path, ...] }
+# group_name == "" means the root / flat-file selection.
+_tex_groups: dict = {}
+_tex_current_group: int = 0
+
+# Aliases checked in order — ORM must come before Occlusion because
+# _occlussionroughnessmetallic starts with _occl.
+_TEX_ALIASES = [
+    ('Color',        ['_color', '_base', '_diffuse', '-color', '-base', '-diffuse']),
+    ('ORM',          ['_occlussionroughnessmetallic', '_orm', '-occlussionroughnessmetallic', '-orm']),
+    ('Normal',       ['_norm', '_nrm', '-norm', '-nrm']),
+    ('Occlusion',    ['_ao', '_occl', '-ao', '-occl']),
+    ('Roughness',    ['_rough', '-rough']),
+    ('Metallic',     ['_metal', '-metal']),
+    ('Specular',     ['_spec', '-spec']),
+    ('Reflection',   ['_refl', '-refl']),
+    ('Emission',     ['_emiss', '-emiss']),
+    ('Opacity',      ['_opacity', '_alpha', '-opacity', '-alpha']),
+    ('Height',       ['_height', '_disp', '-height', '-disp']),
+    ('Glossiness',   ['_gloss', '-gloss']),
+    ('SSS',          ['_sss', '_subs', '-sss', '-subs']),
+    ('Transmission', ['_trans', '-trans']),
+    ('Sheen',        ['_sheen', '-sheen']),
+    ('Coat',         ['_clearcoat', '_coat', '-clearcoat', '-coat']),
+    ('Mask',         ['_mask', '-mask']),
+]
+
+_TEX_DISPLAY_ORDER = [
+    'Color', 'Roughness', 'Reflection', 'Metallic', 'ORM', 'Occlusion',
+    'Specular', 'Glossiness', 'SSS', 'Transmission', 'Sheen', 'Coat',
+    'Emission', 'Opacity', 'Height', 'Normal', 'Mask',
+]
+
+
+class TexDisplayItem(PropertyGroup):
+    """One row in the texture preview list inside the Add Item dialog."""
+    label: StringProperty()  # type: ignore
+
+
+class OPT_UL_tex_list(UIList):
+    """Scrollable read-only texture list for the Add Item dialog."""
+    bl_idname = "OPT_UL_tex_list"
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        if ": " in item.label:
+            type_part, name_part = item.label.split(": ", 1)
+            split = layout.split(factor=0.23)
+            split.label(text=type_part + ":")
+            split.label(text=name_part)
+        else:
+            layout.label(text=item.label)
+
+    def draw_filter(self, context, layout):
+        """Draw the search filter input."""
+        row = layout.row()
+        row.prop(self, "filter_name", text="")
+
+    def filter_items(self, context, data, propname):
+        items = getattr(data, propname)
+        flt_flags = bpy.types.UI_UL_list.filter_items_by_name(
+            self.filter_name, self.bitflag_filter_item, items, "label",
+        )
+        return flt_flags, []
+
+
+def _rebuild_tex_display(scene):
+    """Rebuild scene.optiflow_tex_display from the current _tex_groups entry."""
+    if not hasattr(scene, "optiflow_tex_display"):
+        return
+    col = scene.optiflow_tex_display
+    col.clear()
+    if not _tex_groups:
+        return
+    group_keys   = list(_tex_groups.keys())
+    group_idx    = max(0, min(_tex_current_group, len(group_keys) - 1))
+    current_paths = _tex_groups[group_keys[group_idx]]
+    by_type = {}
+    for path in current_paths:
+        fname = os.path.basename(path)
+        t     = _classify_tex(fname)
+        if t is not None:
+            by_type.setdefault(t, []).append(fname)
+    for tex_type in _TEX_DISPLAY_ORDER:
+        names = sorted(by_type.get(tex_type, []))
+        for i, name in enumerate(names):
+            entry = col.add()
+            entry.label = (f"{tex_type}: {name}" if len(names) == 1
+                           else f"{tex_type} {i + 1}: {name}")
+
+
+def _classify_tex(filename):
+    """Return the texture type label for a given filename, or None if unrecognised."""
+    stem = os.path.splitext(filename)[0].lower()
+    for tex_type, aliases in _TEX_ALIASES:
+        for alias in aliases:
+            if alias in stem:
+                return tex_type
+    return None
+
+
+def _scan_tex_folder(root):
+    """BFS-scan root for images up to depth 4, at most 256 folders total.
+
+    Returns a dict mapping group_name -> [abs_path, ...].
+    The root folder itself gets group_name ""; subfolders get their
+    POSIX-style path relative to root (e.g. "Sub1/Sub2/Sub3").
+    """
+    groups = {}
+    queue = [(root, 0)]
+    folders_scanned = 0
+    while queue and folders_scanned < 256:
+        dirpath, depth = queue.pop(0)
+        folders_scanned += 1
+        try:
+            entries = list(os.scandir(dirpath))
+        except OSError:
+            continue
+        images = [
+            e.path for e in entries
+            if e.is_file()
+            and os.path.splitext(e.name)[1].lower() in _SUPPORTED_TEX_EXTS
+        ]
+        if images:
+            rel = os.path.relpath(dirpath, root)
+            group_name = "" if rel == '.' else rel.replace(os.sep, '/')
+            groups[group_name] = images
+        if depth < 4:
+            subdirs = sorted(
+                e.path for e in entries
+                if e.is_dir(follow_symlinks=False)
+            )
+            queue.extend((d, depth + 1) for d in subdirs)
+    return groups
+
+
+class OPT_OT_select_textures(Operator):
+    """Open a file browser to pick texture images or a folder."""
+    bl_idname  = "optiflow.select_textures"
+    bl_label   = "Select Textures/Folder"
+    bl_description = "Select texture(s) or a folder containing texture(s)"
+    bl_options = {'REGISTER', 'INTERNAL'}
+
+    directory:   StringProperty(subtype='DIR_PATH', options={'HIDDEN'})  # type: ignore
+    files:       CollectionProperty(                                       # type: ignore
+        type=bpy.types.OperatorFileListElement,
+        options={'HIDDEN', 'SKIP_SAVE'},
+    )
+    filter_glob: StringProperty(                                           # type: ignore
+        default="*.jpg;*.jpeg;*.png;*.webp",
+        options={'HIDDEN'},
+    )
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        global _tex_groups, _tex_current_group
+        _tex_groups.clear()
+        _tex_current_group = 0
+        dir_abs = bpy.path.abspath(self.directory)
+        file_names = [
+            f.name for f in self.files
+            if f.name and os.path.isfile(os.path.join(dir_abs, f.name))
+            and os.path.splitext(f.name)[1].lower() in _SUPPORTED_TEX_EXTS
+        ]
+        if file_names:
+            paths = [
+                os.path.join(dir_abs, n) for n in file_names
+                if _classify_tex(n) is not None
+            ]
+            if paths:
+                _tex_groups[""] = paths
+        else:
+            for group_name, paths in _scan_tex_folder(dir_abs).items():
+                filtered = [p for p in paths if _classify_tex(os.path.basename(p)) is not None]
+                if filtered:
+                    _tex_groups[group_name] = filtered
+        _rebuild_tex_display(context.scene)
+        return {'FINISHED'}
+
+
+class OPT_OT_clear_textures(Operator):
+    """Clear the current texture selection from the Add Item dialog."""
+    bl_idname  = "optiflow.clear_textures"
+    bl_label   = "Clear Textures"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        global _tex_groups, _tex_current_group
+        _tex_groups.clear()
+        _tex_current_group = 0
+        if hasattr(context.scene, "optiflow_tex_display"):
+            context.scene.optiflow_tex_display.clear()
+        return {'FINISHED'}
+
+
+class OPT_OT_tex_group_nav(Operator):
+    """Navigate between texture groups in the Add Item dialog."""
+    bl_idname  = "optiflow.tex_group_nav"
+    bl_label   = "Navigate Texture Group"
+    bl_options = {'INTERNAL'}
+
+    action: EnumProperty(items=[  # type: ignore
+        ('FIRST', 'First', ''),
+        ('PREV',  'Prev',  ''),
+        ('NEXT',  'Next',  ''),
+        ('LAST',  'Last',  ''),
+    ])
+
+    def execute(self, context):
+        global _tex_current_group
+        n = len(_tex_groups)
+        if n == 0:
+            return {'CANCELLED'}
+        if self.action == 'FIRST':
+            _tex_current_group = 0
+        elif self.action == 'PREV':
+            _tex_current_group = max(0, _tex_current_group - 1)
+        elif self.action == 'NEXT':
+            _tex_current_group = min(n - 1, _tex_current_group + 1)
+        elif self.action == 'LAST':
+            _tex_current_group = n - 1
+        _rebuild_tex_display(context.scene)
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                area.tag_redraw()
+        return {'FINISHED'}
+
+# endregion
 
 # region Placeholder
 
@@ -143,7 +379,9 @@ class OPT_OT_add_item(Operator):
     bl_description = "Add a new imported item"
     bl_options = {'INTERNAL'}
 
-    test: StringProperty() # type: ignore
+    object_path:   StringProperty(name="Object", description="", default="")  # type: ignore
+    collider_path: StringProperty(name="Collider", description="", default="")  # type: ignore
+    item_alias: StringProperty(name="Alias", description="Descriptive for identification only", default="")  # type: ignore
     item_mode: EnumProperty(
         name="Mode",
         items=constants.ITEM_TYPE,
@@ -154,7 +392,43 @@ class OPT_OT_add_item(Operator):
     )  # type: ignore
     preview_image_name: StringProperty(name="Texture", default="")  # type: ignore
 
+    tex_roughness_enabled: BoolProperty(name="Toggle Roughness", description="Replaces roughness — multiplies values if a map is provided (using a mask if available)", default=False)  # type: ignore
+    tex_roughness: FloatProperty(name="Roughness", subtype='PERCENTAGE', min=0.0, max=100.0, default=50.0)  # type: ignore
+    tex_metallic_enabled: BoolProperty(name="Toggle Metallic", description="Replaces metallic — multiplies values if a map is provided (using a mask if available)", default=False)  # type: ignore
+    tex_metallic: FloatProperty(name="Metallic", subtype='PERCENTAGE', min=0.0, max=100.0, default=50.0)  # type: ignore
+    tex_size_enabled: BoolProperty(name="Toggle Resize", default=False)  # type: ignore
+    tex_size: EnumProperty(
+        name="Size",
+        items=constants.TEXTURE_SIZES,
+        default='4096',
+    )  # type: ignore
+    tex_compression_enabled: BoolProperty(name="Toggle Compression", default=False)  # type: ignore
+    tex_compression: EnumProperty(
+        name="Compression",
+        items=[
+            ('AUTO', 'Auto', 'Preserve details — Minumum quality'),
+            ('SMALLEST', 'Smallest Size', 'Lighter size, Lower quality'),
+            ('BALANCED', 'Balanced', 'Moderate size — Medium quality'),
+            ('HIGHER', 'Higher Quality', 'Heavier size — Higher quality'),
+        ],
+        default='AUTO',
+    )  # type: ignore
+    tex_format_enabled: BoolProperty(name="Toggle Reformat", default=False)  # type: ignore
+    tex_format: EnumProperty(
+        name="Format",
+        items=[
+            ('JPG', 'JPG', ''),
+            ('PNG', 'PNG', ''),
+            ('WEBP', 'WEBP', ''),
+        ],
+    )  # type: ignore
+
     def invoke(self, context, event):
+        global _tex_groups, _tex_current_group
+        _tex_groups.clear()
+        _tex_current_group = 0
+        if hasattr(context.scene, "optiflow_tex_display"):
+            context.scene.optiflow_tex_display.clear()
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):
@@ -163,26 +437,67 @@ class OPT_OT_add_item(Operator):
         row.prop(self, "item_mode", expand=True)
         layout.separator(type='LINE')
         if self.item_mode == "OBJECT":
-            dir_input(layout, self, "Object:", "test")
-            dir_input(layout, self, "Collider:", "test")
+            file_input(layout, self, "Object:", "object_path",
+                       file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
+            file_input(layout, self, "Collider:", "collider_path",
+                       file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
         elif self.item_mode == "PRESET":
             prop_input(layout, self, "Mesh:", "item_preset")
+        prop_input(layout, self, "Alias:", "item_alias")
         layout.separator(type='LINE')
-        path_input(layout, self, "Textures:", "test", filter_glob="*.png;*.jpg;*.jpeg;*.webp")
-
-        layout.prop_search(self, "preview_image_name", bpy.data, "images", text="Texture")
-        img = bpy.data.images.get(self.preview_image_name)
-        if img:
-            box = layout.box()
-            row = box.row()
-            row.alignment = 'LEFT'
-            row.template_icon(icon_value=img.preview.icon_id, scale=1.0)
-            row.label(text="woo")
+        row = layout.row(align=True)
+        row.operator("optiflow.select_textures", text="Add Texture(s)")
+        if _tex_groups:
+            row.operator("optiflow.clear_textures", text="", icon='X')
         else:
-            box = layout.box()
-            col = box.column()
-            col.label(text="No texture selected", icon='IMAGE_DATA')
+            row.operator("optiflow.select_textures", text="", icon='IMPORT')
         layout.separator(type='LINE')
+        if _tex_groups:
+            group_keys = list(_tex_groups.keys())
+            n_groups   = len(group_keys)
+            group_idx  = (0 if self.item_mode == 'OBJECT'
+                          else max(0, min(_tex_current_group, n_groups - 1)))
+
+            if self.item_mode == 'PRESET':
+                display_name = group_keys[group_idx] if group_keys[group_idx] else "\u2014\u2014"
+                count_str    = f"{group_idx + 1:02d}/{n_groups:02d}"
+                row = layout.row(align=True)
+                sub = row.row(align=True)
+                sub.enabled = group_idx > 0
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_LEFT_BAR")
+                op.action = 'FIRST'
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_LEFT")
+                op.action = 'PREV'
+                mid = row.row()
+                mid.alignment = 'CENTER'
+                mid.label(text=f"{display_name} ({count_str})" if group_keys[group_idx] else f"{display_name}")
+                sub = row.row(align=True)
+                sub.enabled = group_idx < n_groups - 1
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT")
+                op.action = 'NEXT'
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT_BAR")
+                op.action = 'LAST'
+
+            layout.template_list(
+                "OPT_UL_tex_list", "",
+                context.scene, "optiflow_tex_display",
+                context.scene, "optiflow_tex_display_index",
+                rows=6,
+            )
+            for label, enabled_prop, value_prop, slider in [
+                ("Roughness:", "tex_roughness_enabled", "tex_roughness",    True),
+                ("Metallic:",  "tex_metallic_enabled",  "tex_metallic",     True),
+                ("Size:",      "tex_size_enabled",       "tex_size",         False),
+                ("Compression:", "tex_compression_enabled", "tex_compression", False),
+                ("Format:",    "tex_format_enabled",    "tex_format",       False),
+            ]:
+                split = layout.split(factor=0.23)
+                split.label(text=label)
+                row = split.row(align=True)
+                row.prop(self, enabled_prop, text="", icon="DOT", toggle=True)
+                sub = row.row(align=True)
+                sub.enabled = getattr(self, enabled_prop)
+                sub.prop(self, value_prop, text="", slider=slider)
 
     def execute(self, context):
         return {'FINISHED'}

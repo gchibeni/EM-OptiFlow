@@ -102,6 +102,9 @@ def export_file(filepath, exporter):
                 embed_textures=exporter.embed_materials,
                 path_mode='COPY' if exporter.embed_materials else 'AUTO',
                 bake_anim=exporter.animations,
+                bake_anim_use_all_bones=True,
+                bake_anim_use_nla_strips=True,
+                bake_anim_use_all_actions=False,
             )
         case 'OBJ':
             bpy.ops.wm.obj_export(

@@ -170,7 +170,10 @@ def _is_mouse_in_optiflow_panel(context, mouse_x, mouse_y):
 def register():
     """Register scene properties, handlers, and key listener timer."""
     from ..core.properties import FlatEntry, Group, Exporter
+    from ..operators.items import TexDisplayItem
     Scene.show_items            = BoolProperty(name="Items", default=True)
+    Scene.optiflow_tex_display       = CollectionProperty(type=TexDisplayItem, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_tex_display_index = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_groups       = CollectionProperty(name="", type=Group, options={'HIDDEN'})
     Scene.optiflow_flat_entries = CollectionProperty(name="", type=FlatEntry, options={'HIDDEN'})
     Scene.optiflow_flat_index   = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})
@@ -202,7 +205,7 @@ def unregister():
     for attr in (
         "show_items", "optiflow_groups", "optiflow_flat_entries", "optiflow_flat_index",
         "export_path", "copyright_text", "exporters", "exporters_index", "show_exporters",
-        "optiflow_origin_wip",
+        "optiflow_origin_wip", "optiflow_tex_display", "optiflow_tex_display_index",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)
