@@ -14,6 +14,7 @@ _SUPPORTED_TEX_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.webp'})
 # group_name == "" means the root / flat-file selection.
 _tex_groups: dict = {}
 _tex_current_group: int = 0
+_tex_btn_mouse_pos: tuple = (0, 0)
 
 # Aliases checked in order — ORM must come before Occlusion because
 # _occlussionroughnessmetallic starts with _occl.
@@ -53,14 +54,18 @@ class OPT_UL_tex_list(UIList):
     """Scrollable read-only texture list for the Add Item dialog."""
     bl_idname = "OPT_UL_tex_list"
 
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index=0, flt_flag=0):
+        row = layout.row(align=True)
         if ": " in item.label:
             type_part, name_part = item.label.split(": ", 1)
-            split = layout.split(factor=0.23)
+            split = row.split(factor=0.23)
             split.label(text=type_part + ":")
             split.label(text=name_part)
         else:
-            layout.label(text=item.label)
+            row.label(text=item.label)
+        if index == getattr(active_data, active_propname, -1):
+            op = row.operator("optiflow.remove_texture_map", text="", icon="X", emboss=False)
+            op.label = item.label
 
     def draw_filter(self, context, layout):
         """Draw the search filter input."""
@@ -163,6 +168,8 @@ class OPT_OT_select_textures(Operator):
     )
 
     def invoke(self, context, event):
+        global _tex_btn_mouse_pos
+        _tex_btn_mouse_pos = (event.mouse_x, event.mouse_y)
         context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -189,11 +196,12 @@ class OPT_OT_select_textures(Operator):
                 if filtered:
                     _tex_groups[group_name] = filtered
         _rebuild_tex_display(context.scene)
+        helpers.snap_cursor(*_tex_btn_mouse_pos)
         return {'FINISHED'}
 
 
 class OPT_OT_clear_textures(Operator):
-    """Clear the current texture selection from the Add Item dialog."""
+    """Clear all texture groups from the Add Item dialog."""
     bl_idname  = "optiflow.clear_textures"
     bl_label   = "Clear Textures"
     bl_options = {'INTERNAL'}
@@ -207,10 +215,55 @@ class OPT_OT_clear_textures(Operator):
         return {'FINISHED'}
 
 
+class OPT_OT_remove_tex_group(Operator):
+    """Remove the current texture group from the list."""
+    bl_idname  = "optiflow.remove_tex_group"
+    bl_label   = "Remove Texture Group"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        global _tex_groups, _tex_current_group
+        if not _tex_groups:
+            return {'CANCELLED'}
+        group_keys = list(_tex_groups.keys())
+        key = group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]
+        del _tex_groups[key]
+        _tex_current_group = max(0, min(_tex_current_group, len(_tex_groups) - 1))
+        _rebuild_tex_display(context.scene)
+        return {'FINISHED'}
+
+
+class OPT_OT_remove_texture_map(Operator):
+    """Remove this texture from the current group."""
+    bl_idname  = "optiflow.remove_texture_map"
+    bl_label   = "Remove Texture"
+    bl_options = {'INTERNAL'}
+
+    label: StringProperty(options={'HIDDEN'})  # type: ignore
+
+    def execute(self, context):
+        global _tex_groups, _tex_current_group
+        if not _tex_groups:
+            return {'CANCELLED'}
+        filename = self.label.split(": ", 1)[-1] if ": " in self.label else self.label
+        group_keys = list(_tex_groups.keys())
+        key = group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]
+        new_paths = [p for p in _tex_groups[key] if os.path.basename(p) != filename]
+        if len(new_paths) == len(_tex_groups[key]):
+            return {'CANCELLED'}
+        if new_paths:
+            _tex_groups[key] = new_paths
+        else:
+            del _tex_groups[key]
+            _tex_current_group = max(0, min(_tex_current_group, len(_tex_groups) - 1))
+        _rebuild_tex_display(context.scene)
+        return {'FINISHED'}
+
+
 class OPT_OT_tex_group_nav(Operator):
     """Navigate between texture groups in the Add Item dialog."""
     bl_idname  = "optiflow.tex_group_nav"
-    bl_label   = "Navigate Texture Group"
+    bl_label   = "Navigate"
     bl_options = {'INTERNAL'}
 
     action: EnumProperty(items=[  # type: ignore
@@ -219,6 +272,15 @@ class OPT_OT_tex_group_nav(Operator):
         ('NEXT',  'Next',  ''),
         ('LAST',  'Last',  ''),
     ])
+
+    @classmethod
+    def description(cls, context, properties):
+        return {
+            'FIRST': "Go to first texture group",
+            'PREV':  "Go to previous texture group",
+            'NEXT':  "Go to next texture group",
+            'LAST':  "Go to last texture group",
+        }.get(properties.action, "")
 
     def execute(self, context):
         global _tex_current_group
@@ -348,6 +410,99 @@ class OPT_OT_confirm_merge(Operator):
 
 # region Add
 
+_3D_IMPORTERS = {
+    '.fbx':  lambda fp: bpy.ops.import_scene.fbx(filepath=fp, use_image_search=False),
+    '.glb':  lambda fp: bpy.ops.import_scene.gltf(filepath=fp),
+    '.gltf': lambda fp: bpy.ops.import_scene.gltf(filepath=fp),
+    '.obj':  lambda fp: bpy.ops.wm.obj_import(filepath=fp),
+    '.abc':  lambda fp: bpy.ops.wm.alembic_import(filepath=fp),
+    '.usd':  lambda fp: bpy.ops.wm.usd_import(filepath=fp),
+    '.usda': lambda fp: bpy.ops.wm.usd_import(filepath=fp),
+    '.usdc': lambda fp: bpy.ops.wm.usd_import(filepath=fp),
+    '.usdz': lambda fp: bpy.ops.wm.usd_import(filepath=fp),
+    '.dae':  lambda fp: bpy.ops.wm.collada_import(filepath=fp),
+    '.stl':  lambda fp: bpy.ops.wm.stl_import(filepath=fp),
+    '.ply':  lambda fp: bpy.ops.wm.ply_import(filepath=fp),
+    '.x3d':  lambda fp: bpy.ops.import_scene.x3d(filepath=fp),
+}
+
+
+def _import_3d(filepath):
+    """Import a 3D file, return new objects or None on unsupported/failure."""
+    fn = _3D_IMPORTERS.get(os.path.splitext(filepath)[1].lower())
+    if fn is None:
+        return None
+    before = set(bpy.data.objects[:])
+    try:
+        result = fn(filepath)
+    except Exception:
+        return None
+    if isinstance(result, set) and 'CANCELLED' in result:
+        return None
+    return [o for o in bpy.data.objects if o not in before]
+
+
+def _strip_materials(objs):
+    for obj in objs:
+        if obj.type == 'MESH' and obj.data:
+            obj.data.materials.clear()
+
+
+def _push_actions_to_nla(objs):
+    for obj in objs:
+        if not (obj.animation_data and obj.animation_data.action):
+            continue
+        action = obj.animation_data.action
+        track  = obj.animation_data.nla_tracks.new()
+        track.name = action.name
+        track.strips.new(action.name, int(action.frame_range[0]), action)
+        obj.animation_data.action = None
+
+
+def _mark_colliders(objs):
+    """Give imported collider objects a COL_ prefix so the rename system picks it up."""
+    for i, obj in enumerate(objs):
+        tmp = f"COL_tmp_{i}"
+        obj.name = tmp
+        if obj.type == 'MESH' and obj.data:
+            obj.data.name = tmp
+
+
+def _derive_name_from_color(color_path):
+    """Strip recognized color-type suffixes from a texture filename to form an item name."""
+    stem = os.path.splitext(os.path.basename(color_path))[0]
+    for suffix in ('_basecolor', '-basecolor', '_color', '-color', '_diffuse', '-diffuse'):
+        idx = stem.lower().find(suffix)
+        if idx != -1:
+            stem = stem[:idx]
+            break
+    return helpers.sanitize_name(stem)
+
+
+def _next_new_object_name(group):
+    existing = {it.name for it in group.items}
+    n = 1
+    while f"NEW_OBJECT_{n}" in existing:
+        n += 1
+    return f"NEW_OBJECT_{n}"
+
+
+def _add_item(context, group, item_type, preset, objs, name, alias=""):
+    """Create one item in group, link objects (or apply preset mesh), then set name."""
+    it           = group.items.add()
+    it.item_type = item_type
+    it.preset    = preset
+    it.alias     = alias
+    if item_type == 'PRESET':
+        it.name = name             # sanitise + uniqueness; no objects yet → rename is no-op
+        _apply_preset(context, it, preset)
+    else:
+        for obj in objs:
+            it.objects.add().object = obj
+        it.name = name             # fires rename with all objects already present
+    return it
+
+
 class OPT_OT_add_empty(Operator):
     """Create an empty item in the current group."""
     bl_idname  = "optiflow.add_empty"
@@ -377,10 +532,8 @@ class OPT_OT_add_item(Operator):
     bl_idname  = "optiflow.add_item"
     bl_label   = "Add Item"
     bl_description = "Add a new imported item"
-    bl_options = {'INTERNAL'}
+    bl_options = {'INTERNAL', 'UNDO'}
 
-    object_path:   StringProperty(name="Object", description="", default="")  # type: ignore
-    collider_path: StringProperty(name="Collider", description="", default="")  # type: ignore
     item_alias: StringProperty(name="Alias", description="Descriptive for identification only", default="")  # type: ignore
     item_mode: EnumProperty(
         name="Mode",
@@ -429,6 +582,20 @@ class OPT_OT_add_item(Operator):
         _tex_current_group = 0
         if hasattr(context.scene, "optiflow_tex_display"):
             context.scene.optiflow_tex_display.clear()
+        context.scene.optiflow_add_obj_path = ""
+        context.scene.optiflow_add_col_path = ""
+        self.item_alias             = ""
+        self.item_preset            = constants.MESH_TYPE[0][0] if constants.MESH_TYPE else 'TILE'
+        self.tex_roughness_enabled  = False
+        self.tex_roughness          = 50.0
+        self.tex_metallic_enabled   = False
+        self.tex_metallic           = 50.0
+        self.tex_size_enabled       = False
+        self.tex_size               = '4096'
+        self.tex_compression_enabled = False
+        self.tex_compression        = 'AUTO'
+        self.tex_format_enabled     = False
+        self.tex_format             = 'JPG'
         return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):
@@ -437,9 +604,9 @@ class OPT_OT_add_item(Operator):
         row.prop(self, "item_mode", expand=True)
         layout.separator(type='LINE')
         if self.item_mode == "OBJECT":
-            file_input(layout, self, "Object:", "object_path",
+            file_input(layout, context.scene, "Object:", "optiflow_add_obj_path",
                        file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
-            file_input(layout, self, "Collider:", "collider_path",
+            file_input(layout, context.scene, "Collider:", "optiflow_add_col_path",
                        file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
         elif self.item_mode == "PRESET":
             prop_input(layout, self, "Mesh:", "item_preset")
@@ -455,10 +622,9 @@ class OPT_OT_add_item(Operator):
         if _tex_groups:
             group_keys = list(_tex_groups.keys())
             n_groups   = len(group_keys)
-            group_idx  = (0 if self.item_mode == 'OBJECT'
-                          else max(0, min(_tex_current_group, n_groups - 1)))
+            group_idx  = max(0, min(_tex_current_group, n_groups - 1))
 
-            if self.item_mode == 'PRESET':
+            if n_groups > 1:
                 display_name = group_keys[group_idx] if group_keys[group_idx] else "\u2014\u2014"
                 count_str    = f"{group_idx + 1:02d}/{n_groups:02d}"
                 row = layout.row(align=True)
@@ -477,6 +643,8 @@ class OPT_OT_add_item(Operator):
                 op.action = 'NEXT'
                 op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT_BAR")
                 op.action = 'LAST'
+                last = row.row(align=True)
+                last.operator("optiflow.remove_tex_group", text="", icon='TRASH')
 
             layout.template_list(
                 "OPT_UL_tex_list", "",
@@ -500,7 +668,96 @@ class OPT_OT_add_item(Operator):
                 sub.prop(self, value_prop, text="", slider=slider)
 
     def execute(self, context):
+        scene = context.scene
+        if self.item_mode == 'OBJECT':
+            return self._exec_object(context, scene)
+        return self._exec_preset(context, scene)
+
+    def _exec_object(self, context, scene):
+        obj_path = bpy.path.abspath(scene.optiflow_add_obj_path) if scene.optiflow_add_obj_path else ""
+        if not obj_path or not os.path.isfile(obj_path):
+            self.report({'ERROR'}, "Invalid object path")
+            return {'CANCELLED'}
+
+        obj_objs = _import_3d(obj_path)
+        if obj_objs is None:
+            self.report({'ERROR'}, f"Unsupported format: {os.path.splitext(obj_path)[1]}")
+            return {'CANCELLED'}
+        if not obj_objs:
+            self.report({'ERROR'}, "No objects imported from the object file")
+            return {'CANCELLED'}
+        _strip_materials(obj_objs)
+        _push_actions_to_nla(obj_objs)
+
+        col_objs = []
+        if scene.optiflow_add_col_path:
+            col_path = bpy.path.abspath(scene.optiflow_add_col_path)
+            if not os.path.isfile(col_path):
+                self.report({'WARNING'}, "Collider path is invalid — skipping")
+            else:
+                imported = _import_3d(col_path)
+                if not imported:
+                    self.report({'WARNING'}, "No objects imported from collider — skipping")
+                else:
+                    _strip_materials(imported)
+                    _mark_colliders(imported)
+                    col_objs = imported
+
+        group, gi = helpers.ensure_default_group(scene)
+
+        name = ""
+        if _tex_groups:
+            group_keys = list(_tex_groups.keys())
+            paths = _tex_groups[group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]]
+            for p in paths:
+                if _classify_tex(os.path.basename(p)) == 'Color':
+                    name = _derive_name_from_color(p)
+                    break
+        if not name:
+            name = _next_new_object_name(group)
+
+        ii = len(group.items)
+        _add_item(context, group, 'OBJECT', self.item_preset, obj_objs + col_objs, name, self.item_alias)
+        helpers.rebuild_and_select(scene, gi, ii)
+        helpers.tag_redraw_all(context)
         return {'FINISHED'}
+
+    def _exec_preset(self, context, scene):
+        if len(_tex_groups) <= 1:
+            group, gi = helpers.ensure_default_group(scene)
+            paths = list(_tex_groups.values())[0] if _tex_groups else []
+            self._make_preset_items(context, group, paths)
+            ii = max(0, len(group.items) - 1)
+            helpers.rebuild_and_select(scene, gi, ii)
+        else:
+            last_gi = last_ii = 0
+            for gname, paths in _tex_groups.items():
+                safe   = helpers.sanitize_group_name(gname) if gname else "GROUP"
+                groups = scene.optiflow_groups
+                gi     = next((i for i, g in enumerate(groups) if g.name == safe), -1)
+                if gi == -1:
+                    g           = groups.add()
+                    g.name      = safe
+                    g.prev_name = safe
+                    g.expanded  = True
+                    gi          = len(groups) - 1
+                group = groups[gi]
+                self._make_preset_items(context, group, paths)
+                if group.items:
+                    last_gi, last_ii = gi, len(group.items) - 1
+            helpers.rebuild_and_select(scene, last_gi, last_ii)
+
+        helpers.tag_redraw_all(context)
+        return {'FINISHED'}
+
+    def _make_preset_items(self, context, group, paths):
+        colors = [p for p in paths if _classify_tex(os.path.basename(p)) == 'Color']
+        if not colors:
+            _add_item(context, group, 'PRESET', self.item_preset, [], _next_new_object_name(group), self.item_alias)
+            return
+        for color_path in colors:
+            name = _derive_name_from_color(color_path) or _next_new_object_name(group)
+            _add_item(context, group, 'PRESET', self.item_preset, [], name, self.item_alias)
 
 # endregion
 

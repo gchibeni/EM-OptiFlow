@@ -89,13 +89,14 @@ def _rename_item_objects(objs, clean_name):
 
     for prefix, group in prefix_groups.items():
         apply_invisible = prefix in _INVISIBLE_PREFIXES
+        base = helpers.strip_trailing_number(clean_name)
         if len(group) == 1:
-            helpers.rename_obj(group[0], f"{prefix}_{clean_name}")
+            helpers.rename_obj(group[0], f"{prefix}_{base}")
             if apply_invisible:
                 helpers.set_invisible_mat(group[0], "ColMat")
         else:
             for i, obj in enumerate(group, start=1):
-                helpers.rename_obj(obj, f"{prefix}_{clean_name}_{i}")
+                helpers.rename_obj(obj, f"{prefix}_{base}_{i}")
                 if apply_invisible:
                     helpers.set_invisible_mat(obj, "ColMat")
 

@@ -174,6 +174,10 @@ def register():
     Scene.show_items            = BoolProperty(name="Items", default=True)
     Scene.optiflow_tex_display       = CollectionProperty(type=TexDisplayItem, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_tex_display_index = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_add_obj_path      = StringProperty(name="Object",        default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_add_col_path      = StringProperty(name="Collider",      default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_edit_override_path = StringProperty(name="Override Path", default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_extract_tex_dir   = StringProperty(name="Output Folder",  default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_groups       = CollectionProperty(name="", type=Group, options={'HIDDEN'})
     Scene.optiflow_flat_entries = CollectionProperty(name="", type=FlatEntry, options={'HIDDEN'})
     Scene.optiflow_flat_index   = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})
@@ -206,6 +210,8 @@ def unregister():
         "show_items", "optiflow_groups", "optiflow_flat_entries", "optiflow_flat_index",
         "export_path", "copyright_text", "exporters", "exporters_index", "show_exporters",
         "optiflow_origin_wip", "optiflow_tex_display", "optiflow_tex_display_index",
+        "optiflow_add_obj_path", "optiflow_add_col_path",
+        "optiflow_edit_override_path", "optiflow_extract_tex_dir",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)

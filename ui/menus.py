@@ -225,23 +225,22 @@ class OPTIFLOW_OT_extract_textures(Operator):
         'WEBP':                 '.webp',
     }
 
-    directory: StringProperty(name="Output Folder")  # type: ignore
-
     @classmethod
     def poll(cls, context):
         return len(context.selected_objects) > 0
 
     def invoke(self, context, event):
+        context.scene.optiflow_extract_tex_dir = ""
         return context.window_manager.invoke_props_dialog(self, width=420, confirm_text="Extract")
 
     def draw(self, context):
         from .file_dialogs import dir_input
         layout = self.layout
-        dir_input(layout, self, "Output Folder:", "directory")
+        dir_input(layout, context.scene, "Output Folder:", "optiflow_extract_tex_dir")
         layout.separator(type="LINE")
 
     def execute(self, context):
-        output_dir = bpy.path.abspath(self.directory)
+        output_dir = bpy.path.abspath(context.scene.optiflow_extract_tex_dir)
         if not os.path.isdir(output_dir):
             self.report({'ERROR'}, "Please select a valid output folder")
             return {'CANCELLED'}

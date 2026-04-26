@@ -107,7 +107,6 @@ class EXPORTERS_OT_edit(Operator):
     bl_options = {'UNDO', 'INTERNAL'}
 
     edit_exporter_type:   EnumProperty(name="Exporter", items=constants.EXPORTER_TYPE)  # type: ignore
-    edit_override_path:   StringProperty(name="Override Path")  # type: ignore
     edit_prefix:          StringProperty(name="Prefix")  # type: ignore
     edit_embed_materials: BoolProperty(name="Embed Materials", default=True)  # type: ignore
     edit_animations:      BoolProperty(name="Animations", default=True)  # type: ignore
@@ -123,7 +122,7 @@ class EXPORTERS_OT_edit(Operator):
             return {'CANCELLED'}
         src = scene.exporters[scene.exporters_index]
         self.edit_exporter_type   = src.exporter_type
-        self.edit_override_path   = src.override_path
+        context.scene.optiflow_edit_override_path = src.override_path
         self.edit_prefix          = src.prefix
         self.edit_embed_materials = src.embed_materials
         self.edit_animations      = src.animations
@@ -137,7 +136,7 @@ class EXPORTERS_OT_edit(Operator):
     def draw(self, context):
         layout = self.layout
         prop_input(layout, self, "Exporter:", "edit_exporter_type")
-        dir_input(layout, self, "Override Path:", "edit_override_path")
+        dir_input(layout, context.scene, "Override Path:", "optiflow_edit_override_path")
         prop_input(layout, self, "Prefix:", "edit_prefix")
         layout.separator(type='LINE')
         split = layout.split(factor=0.23)
@@ -166,7 +165,7 @@ class EXPORTERS_OT_edit(Operator):
         scene    = context.scene
         exporter = scene.exporters[scene.exporters_index]
         exporter.exporter_type   = self.edit_exporter_type
-        exporter.override_path   = self.edit_override_path
+        exporter.override_path   = context.scene.optiflow_edit_override_path
         exporter.prefix          = self.edit_prefix
         exporter.embed_materials = self.edit_embed_materials
         exporter.animations      = self.edit_animations

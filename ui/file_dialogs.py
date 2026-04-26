@@ -2,6 +2,7 @@ import bpy
 import os
 from bpy.types import Operator, UILayout
 from bpy.props import StringProperty, CollectionProperty
+from ..core.helpers import snap_cursor
 
 # region Variables
 
@@ -81,17 +82,7 @@ def _force_redraw(context):
                 region.tag_redraw()
                 if hasattr(region, 'tag_refresh'):
                     region.tag_refresh()
-    # Cursor nudge to force MOUSEMOVE over popups
-    x, y = _last_mouse_pos
-    def _nudge():
-        try:
-            window = bpy.context.window
-            window.cursor_warp(x + 1, y)
-            window.cursor_warp(x, y)
-        except Exception:
-            pass
-        return None
-    bpy.app.timers.register(_nudge, first_interval=0.05)
+    snap_cursor(*_last_mouse_pos)
 
 # endregion
 

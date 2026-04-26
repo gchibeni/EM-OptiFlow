@@ -25,14 +25,19 @@ def sanitize_prefix(name):
     return sanitized.strip('_-')
 
 
+def strip_trailing_number(name):
+    """Return name with any trailing _N suffix removed."""
+    m = re.match(r'^(.*?)_\d+$', name)
+    return m.group(1) if m else name
+
+
 def unique_item_name(desired, group, exclude_item):
     """Generate a unique name among siblings, skipping exclude_item."""
     existing = {it.name for it in group.items
                 if it.as_pointer() != exclude_item.as_pointer()}
     if desired not in existing:
         return desired
-    m = re.match(r'^(.*?)_(\d+)$', desired)
-    base = m.group(1) if m else desired
+    base = strip_trailing_number(desired)
     n = 1
     while f"{base}_{n}" in existing:
         n += 1
@@ -41,8 +46,7 @@ def unique_item_name(desired, group, exclude_item):
 
 def copy_name(base, existing):
     """Generate a copy name with incrementing suffix."""
-    m = re.match(r'^(.*?)(?:[_ ]?\(\d+\)|_(\d+))$', base)
-    clean = m.group(1) if m else base
+    clean = strip_trailing_number(base)
     n = 1
     while f"{clean}_{n}" in existing:
         n += 1
@@ -255,6 +259,18 @@ def tag_redraw_all(context):
     """Tag all areas for redraw."""
     for area in context.window.screen.areas:
         area.tag_redraw()
+
+
+def snap_cursor(x, y, delay=0.05):
+    """Nudge the cursor to (x, y) after a short delay to force popup redraws."""
+    def _nudge():
+        try:
+            bpy.context.window.cursor_warp(x + 1, y)
+            bpy.context.window.cursor_warp(x, y)
+        except Exception:
+            pass
+        return None
+    bpy.app.timers.register(_nudge, first_interval=delay)
 
 # endregion
 
