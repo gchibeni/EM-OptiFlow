@@ -72,6 +72,7 @@ def _draw_main(layout, context):
     _draw_exporters_section(layout, scene)
     layout.separator(type='LINE')
     _draw_export_button(layout, scene)
+    _draw_import_progress(layout, scene)
     layout.separator(type='LINE')
 
 
@@ -146,6 +147,17 @@ def _draw_export_button(layout, scene):
     row         = layout.row()
     row.enabled = has_exportable and has_valid_path
     row.operator("optiflow.export_confirm", text="Export", icon="EXPORT")
+
+def _draw_import_progress(layout, scene):
+    """Draw a progress bar while textures are being imported in the background."""
+    if not scene.optiflow_is_importing:
+        return
+    factor = scene.optiflow_tex_progress
+    layout.separator(factor=0.5)
+    layout.progress(
+        factor=factor,
+        text=f"Importing textures... {int(factor * 100)}%",
+    )
 
 # endregion
 

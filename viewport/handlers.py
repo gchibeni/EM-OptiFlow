@@ -1,7 +1,7 @@
 import bpy
 from bpy.app.handlers import persistent
 from bpy.types import Scene
-from bpy.props import StringProperty, BoolProperty, IntProperty, CollectionProperty
+from bpy.props import StringProperty, BoolProperty, IntProperty, CollectionProperty, FloatProperty
 from . import screen
 
 # region Timers
@@ -187,6 +187,8 @@ def register():
     Scene.exporters_index       = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})
     Scene.show_exporters        = BoolProperty(name="Show Exporters", default=False)
     Scene.optiflow_origin_wip   = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
+    Scene.optiflow_is_importing  = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
+    Scene.optiflow_tex_progress = FloatProperty(name="", default=0.0, min=0.0, max=1.0, options={'HIDDEN', 'SKIP_SAVE'})
     bpy.types.WindowManager.optiflow_ctrl_held = BoolProperty(
         default=False, options={'HIDDEN', 'SKIP_SAVE'},
     )
@@ -199,6 +201,8 @@ def register():
 
 def unregister():
     """Unregister scene properties and handlers."""
+    from ..operators.tex_import import cancel_all
+    cancel_all()
     for handler_list in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         if _on_undo_redo in handler_list:
             handler_list.remove(_on_undo_redo)
@@ -212,6 +216,7 @@ def unregister():
         "optiflow_origin_wip", "optiflow_tex_display", "optiflow_tex_display_index",
         "optiflow_add_obj_path", "optiflow_add_col_path",
         "optiflow_edit_override_path", "optiflow_extract_tex_dir",
+        "optiflow_is_importing", "optiflow_tex_progress",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)

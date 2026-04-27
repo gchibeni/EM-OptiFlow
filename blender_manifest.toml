@@ -54,6 +54,11 @@ wheels = [
   "./wheels/pillow-12.1.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
   "./wheels/pillow-12.1.1-cp313-cp313-win_amd64.whl",
   "./wheels/pillow-12.1.1-cp313-cp313-win_arm64.whl",
+  # mozjpeg-lossless-optimization — optional JPEG optimiser (stable ABI, cp36+)
+  # Available for Windows x64, Linux x64, macOS x64 only.
+  "./wheels/mozjpeg_lossless_optimization-0.2.0-cp36-abi3-win_amd64.whl",
+  "./wheels/mozjpeg_lossless_optimization-0.2.0-cp36-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+  "./wheels/mozjpeg_lossless_optimization-0.2.0-cp36-abi3-macosx_10_9_x86_64.whl",
 ]
 
 # Optional: add-ons can list which resources they will require:

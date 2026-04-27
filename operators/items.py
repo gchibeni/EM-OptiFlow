@@ -487,6 +487,23 @@ def _next_new_object_name(group):
     return f"NEW_OBJECT_{n}"
 
 
+def _split_preset_paths(gi, ii_start, ii_end, paths):
+    """
+    For each preset item created (ii_start..ii_end-1), build a path list that
+    contains the item's own color texture plus all non-color shared maps.
+    Returns list of (gi, ii, filtered_paths).
+    """
+    shared   = [p for p in paths if _classify_tex(os.path.basename(p)) != 'Color']
+    colors   = [p for p in paths if _classify_tex(os.path.basename(p)) == 'Color']
+    result   = []
+    n_items  = ii_end - ii_start
+    for local_idx in range(n_items):
+        color_path = colors[local_idx] if local_idx < len(colors) else (colors[-1] if colors else None)
+        item_paths = ([color_path] if color_path else []) + shared
+        result.append((gi, ii_start + local_idx, item_paths))
+    return result
+
+
 def _add_item(context, group, item_type, preset, objs, name, alias=""):
     """Create one item in group, link objects (or apply preset mesh), then set name."""
     it           = group.items.add()
@@ -669,11 +686,27 @@ class OPT_OT_add_item(Operator):
 
     def execute(self, context):
         scene = context.scene
+        # Snapshot all override values NOW as plain Python primitives.
+        # operator properties must not be read after any bpy call because
+        # Blender may reset the operator state during the UNDO push.
+        overrides = {
+            'item_mode':           str(self.item_mode),
+            'roughness_enabled':   bool(self.tex_roughness_enabled),
+            'roughness':           float(self.tex_roughness),
+            'metallic_enabled':    bool(self.tex_metallic_enabled),
+            'metallic':            float(self.tex_metallic),
+            'size_enabled':        bool(self.tex_size_enabled),
+            'size':                str(self.tex_size),
+            'compression_enabled': bool(self.tex_compression_enabled),
+            'compression':         str(self.tex_compression),
+            'format_enabled':      bool(self.tex_format_enabled),
+            'format':              str(self.tex_format),
+        }
         if self.item_mode == 'OBJECT':
-            return self._exec_object(context, scene)
-        return self._exec_preset(context, scene)
+            return self._exec_object(context, scene, overrides)
+        return self._exec_preset(context, scene, overrides)
 
-    def _exec_object(self, context, scene):
+    def _exec_object(self, context, scene, overrides):
         obj_path = bpy.path.abspath(scene.optiflow_add_obj_path) if scene.optiflow_add_obj_path else ""
         if not obj_path or not os.path.isfile(obj_path):
             self.report({'ERROR'}, "Invalid object path")
@@ -706,10 +739,11 @@ class OPT_OT_add_item(Operator):
         group, gi = helpers.ensure_default_group(scene)
 
         name = ""
+        tex_paths = []
         if _tex_groups:
             group_keys = list(_tex_groups.keys())
-            paths = _tex_groups[group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]]
-            for p in paths:
+            tex_paths  = _tex_groups[group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]]
+            for p in tex_paths:
                 if _classify_tex(os.path.basename(p)) == 'Color':
                     name = _derive_name_from_color(p)
                     break
@@ -720,15 +754,42 @@ class OPT_OT_add_item(Operator):
         _add_item(context, group, 'OBJECT', self.item_preset, obj_objs + col_objs, name, self.item_alias)
         helpers.rebuild_and_select(scene, gi, ii)
         helpers.tag_redraw_all(context)
+
+        if tex_paths:
+            self._schedule_import(scene, gi, ii, tex_paths, overrides)
+
         return {'FINISHED'}
 
-    def _exec_preset(self, context, scene):
+    def _schedule_import(self, scene, gi, ii, tex_paths, overrides):
+        """Kick off async texture import using the pre-captured overrides snapshot."""
+        from .tex_import import schedule_tex_import
+
+        skip = {'COL', 'PLACER', 'SNAP', 'GUIDE'}
+        try:
+            item = scene.optiflow_groups[gi].items[ii]
+        except (IndexError, KeyError):
+            return
+        mesh_names = [
+            ref.object.name for ref in item.objects
+            if ref.object and ref.object.type == 'MESH'
+            and helpers.get_prefix(ref.object) not in skip
+        ]
+        if not mesh_names:
+            return
+
+        schedule_tex_import(gi, ii, mesh_names, tex_paths, overrides, scene)
+
+    def _exec_preset(self, context, scene, overrides):
+        pending = []  # list of (gi, ii, item_paths)
         if len(_tex_groups) <= 1:
             group, gi = helpers.ensure_default_group(scene)
-            paths = list(_tex_groups.values())[0] if _tex_groups else []
+            paths     = list(_tex_groups.values())[0] if _tex_groups else []
+            ii_start  = len(group.items)
             self._make_preset_items(context, group, paths)
             ii = max(0, len(group.items) - 1)
             helpers.rebuild_and_select(scene, gi, ii)
+            if paths:
+                pending.extend(_split_preset_paths(gi, ii_start, len(group.items), paths))
         else:
             last_gi = last_ii = 0
             for gname, paths in _tex_groups.items():
@@ -741,13 +802,20 @@ class OPT_OT_add_item(Operator):
                     g.prev_name = safe
                     g.expanded  = True
                     gi          = len(groups) - 1
-                group = groups[gi]
+                group    = groups[gi]
+                ii_start = len(group.items)
                 self._make_preset_items(context, group, paths)
                 if group.items:
                     last_gi, last_ii = gi, len(group.items) - 1
+                if paths:
+                    pending.extend(_split_preset_paths(gi, ii_start, len(group.items), paths))
             helpers.rebuild_and_select(scene, last_gi, last_ii)
 
         helpers.tag_redraw_all(context)
+
+        for gi, ii, item_paths in pending:
+            self._schedule_import(scene, gi, ii, item_paths, overrides)
+
         return {'FINISHED'}
 
     def _make_preset_items(self, context, group, paths):

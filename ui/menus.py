@@ -181,11 +181,11 @@ class OPTIFLOW_OT_replace_selected_item(Operator):
         self.report({'INFO'}, f"Replaced objects in '{item.name}' with {len(selected)} object(s)")
         return {'FINISHED'}
 
-class OPTIFLOW_OT_change_texture(Operator):
+class OPTIFLOW_OT_change_textures(Operator):
     """Placeholder for texture change feature."""
-    bl_idname  = "optiflow.ctx_change_texture"
-    bl_label   = "Change Texture"
-    bl_description = "Change texture of the selected objects (WIP)"
+    bl_idname  = "optiflow.ctx_change_textures"
+    bl_label   = "Change Textures"
+    bl_description = "Change textures of the selected objects"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -546,7 +546,7 @@ class OPTIFLOW_MT_context_menu(Menu):
         layout.operator("optiflow.ctx_unassign_from_item", icon='UNLINKED')
         layout.operator("optiflow.ctx_replace_item", icon='FILE_REFRESH')
         layout.separator(type="LINE")
-        layout.operator("optiflow.ctx_change_texture", icon='IMAGE_DATA')
+        layout.operator("optiflow.ctx_change_textures", icon='IMAGE_DATA')
         layout.operator("optiflow.ctx_extract_textures", icon='FORCE_TEXTURE')
         layout.operator("optiflow.ctx_check_materials", icon='MATERIAL')
         layout.separator(type="LINE")

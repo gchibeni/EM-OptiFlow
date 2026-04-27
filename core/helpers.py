@@ -246,10 +246,39 @@ def collect_referenced_ptrs(groups, skip_gi=None, skip_item_ptr=None):
 
 
 def delete_unreferenced(to_delete, referenced):
-    """Delete scene objects not present in the referenced set."""
+    """Delete scene objects not in referenced, then purge their orphaned meshes, materials, and images."""
+    # Collect dependent data before removal — obj.data is inaccessible after remove()
+    meshes    = {}
+    materials = {}
+    for ptr, obj in to_delete.items():
+        if ptr in referenced:
+            continue
+        if obj.type == 'MESH' and obj.data:
+            meshes[obj.data.as_pointer()] = obj.data
+            for mat in obj.data.materials:
+                if mat:
+                    materials[mat.as_pointer()] = mat
+
     for ptr, obj in to_delete.items():
         if ptr not in referenced:
             bpy.data.objects.remove(obj, do_unlink=True)
+
+    for mesh in meshes.values():
+        if mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+
+    images = {}
+    for mat in materials.values():
+        if mat.users == 0:
+            if mat.use_nodes and mat.node_tree:
+                for node in mat.node_tree.nodes:
+                    if node.type == 'TEX_IMAGE' and node.image:
+                        images[node.image.as_pointer()] = node.image
+            bpy.data.materials.remove(mat)
+
+    for img in images.values():
+        if img.users == 0:
+            bpy.data.images.remove(img)
 
 # endregion
 
