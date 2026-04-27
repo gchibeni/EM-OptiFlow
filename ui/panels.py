@@ -2,6 +2,7 @@ import bpy
 import os
 from bpy.types import Operator, Panel
 from .file_dialogs import dir_input, prop_input
+from ..operators.updater import get_update_state
 
 # region Header
 
@@ -66,6 +67,16 @@ class optiflow_main(Panel):
 def _draw_main(layout, context):
     """Render the main panel with items, exporters, and export button."""
     scene = context.scene
+    layout.separator(type='LINE')
+    update = get_update_state()
+    row = layout.row()
+    row.operator("optiflow.open_github", text="GitHub", icon="HOME")
+    row.operator("optiflow.open_preferences", text="Settings", icon="TOOL_SETTINGS")
+    update_row = row.row()
+    update_row.enabled = not update.get("checking", False)
+    update_row.alert = update.get("available", False)
+    update_icon = 'PROP_ON' if update.get("available") else 'PREVIEW_LOADING'
+    update_row.operator("optiflow.check_updates", text="", icon=update_icon)
     layout.separator(type='LINE')
     _draw_items_section(layout, scene)
     layout.separator(type='LINE')
