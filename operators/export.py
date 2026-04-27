@@ -237,13 +237,50 @@ class OPT_OT_export_confirm(Operator):
         layout.separator(type='LINE')
 
     def execute(self, context):
-        scene        = context.scene
-        was_isolated = scene.get("optiflow_item_isolated", False)
+        from .isolation import (
+            disable_item_isolation, ensure_item_isolate_timer, optiflow_reveal,
+        )
+        from ..viewport import screen
+
+        scene = context.scene
+
+        was_item_isolated = bool(scene.get("optiflow_item_isolated", False))
+        was_isolated      = bool(scene.get("optiflow_isolated", False))
+        isolated_mode     = scene.get("optiflow_isolated_mode", "")
+
+        # Snapshot per-object visibility before lifting isolation so we can
+        # restore the exact hidden state after export without recomputing it.
+        hidden_before = {}
+        if was_item_isolated or was_isolated:
+            for obj in context.view_layer.objects:
+                hidden_before[obj.name] = obj.hide_viewport
+
+        if was_item_isolated:
+            disable_item_isolation(context, scene)
         if was_isolated:
-            scene["optiflow_item_isolated"] = False
+            optiflow_reveal.reveal(optiflow_reveal, context, scene)
+
         export_all(scene)
+
+        # Restore per-object visibility
+        for name, was_hidden in hidden_before.items():
+            obj = context.view_layer.objects.get(name)
+            if obj:
+                obj.hide_viewport = was_hidden
+
+        # Re-enable item isolation (border + flag + timer)
+        if was_item_isolated:
+            screen.enable_border("#ffcc00", key="item")
+            scene["optiflow_item_isolated"]          = True
+            scene["optiflow_item_isolated_last_idx"] = scene.optiflow_flat_index
+            ensure_item_isolate_timer()
+
+        # Re-enable regular isolation (border + flag)
         if was_isolated:
-            scene["optiflow_item_isolated"] = True
+            screen.enable_border()
+            scene["optiflow_isolated"]      = True
+            scene["optiflow_isolated_mode"] = isolated_mode
+
         self.report({'INFO'}, "Export complete")
         return {'FINISHED'}
 

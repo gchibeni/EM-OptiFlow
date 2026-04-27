@@ -256,10 +256,17 @@ def _process_job(job):
                             return fallback
                         return img if img.size == (w, h) else img.resize((w, h), PILImage.LANCZOS)
 
+                    # For missing channels, bake the override value in as a solid fill
+                    # rather than a hardcoded default — the ORM node bypasses shader values.
+                    rough_fallback = (PILImage.new('L', (w, h), int(ov['roughness'] / 100.0 * 255))
+                                      if rough_img is None and ov.get('roughness_enabled') else white)
+                    metal_fallback = (PILImage.new('L', (w, h), int(ov['metallic'] / 100.0 * 255))
+                                      if metal_img is None and ov.get('metallic_enabled') else black)
+
                     orm_img = PILImage.merge('RGB', (
                         _fit(occl_img,  white),
-                        _fit(rough_img, white),
-                        _fit(metal_img, black),
+                        _fit(rough_img, rough_fallback),
+                        _fit(metal_img, metal_fallback),
                     ))
 
                     ref_src = (orm_sources.get('Roughness')
@@ -522,18 +529,19 @@ def _build_material_for_job(job):
             print(f"[OptiFlow] All textures failed for [{job.gi}][{job.ii}]: {job.first_error}")
         return
 
-    # Locate item across all scenes
-    item = None
-    for sc in bpy.data.scenes:
-        try:
-            g = sc.optiflow_groups[job.gi]
-            i = g.items[job.ii]
-            item = i
-            break
-        except (IndexError, AttributeError, KeyError):
-            continue
-    if item is None:
-        return
+    # gi < 0 is a sentinel used by change_textures — no item guard needed
+    if job.gi >= 0:
+        item = None
+        for sc in bpy.data.scenes:
+            try:
+                g = sc.optiflow_groups[job.gi]
+                i = g.items[job.ii]
+                item = i
+                break
+            except (IndexError, AttributeError, KeyError):
+                continue
+        if item is None:
+            return
 
     # Collect valid mesh objects
     mesh_objs = []
@@ -546,9 +554,8 @@ def _build_material_for_job(job):
 
     colors         = job.bpy_images.get('Color', [])
     is_multi_color = (
-        job.overrides.get('item_mode') == 'OBJECT'
-        and len(mesh_objs) > 2
-        and len(colors) > 1
+        (job.overrides.get('item_mode') == 'OBJECT' and len(mesh_objs) > 2 and len(colors) > 1)
+        or (job.overrides.get('change_tex') and len(mesh_objs) > 1 and len(colors) > 1)
     )
 
     if is_multi_color:
@@ -561,6 +568,18 @@ def _build_material_for_job(job):
         mat = _build_material(job.bpy_images, color_img, job.overrides)
         for obj in mesh_objs:
             _assign_material(obj, mat)
+
+    # Purge old materials and images that are no longer referenced anywhere.
+    # Materials must be removed first so their node trees release image users.
+    for mat_name in job.overrides.get('old_mat_names', []):
+        old_mat = bpy.data.materials.get(mat_name)
+        if old_mat and old_mat.users == 0:
+            bpy.data.materials.remove(old_mat)
+
+    for img_name in job.overrides.get('old_image_names', []):
+        old_img = bpy.data.images.get(img_name)
+        if old_img and old_img.users == 0:
+            bpy.data.images.remove(old_img)
 
 
 def _unique_mat_name(base='Mat'):

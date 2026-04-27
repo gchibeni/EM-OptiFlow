@@ -4,7 +4,8 @@ import mathutils
 import os
 import shutil
 from bpy.types import Operator, Menu
-from bpy.props import StringProperty
+from bpy.props import StringProperty, BoolProperty, FloatProperty, EnumProperty
+from ..core import constants
 from ..core.helpers import (
     get_active_item, ensure_default_group,
     rebuild_and_select, tag_redraw_all, set_invisible_mat,
@@ -182,23 +183,193 @@ class OPTIFLOW_OT_replace_selected_item(Operator):
         return {'FINISHED'}
 
 class OPTIFLOW_OT_change_textures(Operator):
-    """Placeholder for texture change feature."""
+    """Change textures of the selected scene objects."""
     bl_idname  = "optiflow.ctx_change_textures"
     bl_label   = "Change Textures"
     bl_description = "Change textures of the selected objects"
     bl_options = {'REGISTER', 'UNDO'}
 
-    def execute(self, context):
-        return context.window_manager.invoke_popup(self, width=300)
+    tex_roughness_enabled: BoolProperty(name="Toggle Roughness", description="Replaces roughness \u2014 multiplies values if a map is provided (using a mask if available)", default=False)  # type: ignore
+    tex_roughness: FloatProperty(name="Roughness", subtype='PERCENTAGE', min=0.0, max=100.0, default=50.0)  # type: ignore
+    tex_metallic_enabled: BoolProperty(name="Toggle Metallic", description="Replaces metallic \u2014 multiplies values if a map is provided (using a mask if available)", default=False)  # type: ignore
+    tex_metallic: FloatProperty(name="Metallic", subtype='PERCENTAGE', min=0.0, max=100.0, default=50.0)  # type: ignore
+    tex_size_enabled: BoolProperty(name="Toggle Resize", default=False)  # type: ignore
+    tex_size: EnumProperty(name="Size", items=constants.TEXTURE_SIZES, default='4096')  # type: ignore
+    tex_compression_enabled: BoolProperty(name="Toggle Compression", default=False)  # type: ignore
+    tex_compression: EnumProperty(
+        name="Compression",
+        items=[
+            ('AUTO',     'Auto',           'Preserve details \u2014 Minimum quality'),
+            ('SMALLEST', 'Smallest Size',  'Lighter size, Lower quality'),
+            ('BALANCED', 'Balanced',       'Moderate size \u2014 Medium quality'),
+            ('HIGHER',   'Higher Quality', 'Heavier size \u2014 Higher quality'),
+        ],
+        default='AUTO',
+    )  # type: ignore
+    tex_format_enabled: BoolProperty(name="Toggle Reformat", default=False)  # type: ignore
+    tex_format: EnumProperty(
+        name="Format",
+        items=[('JPG', 'JPG', ''), ('PNG', 'PNG', ''), ('WEBP', 'WEBP', '')],
+    )  # type: ignore
+
+    @classmethod
+    def poll(cls, context):
+        return any(obj.type == 'MESH' for obj in context.selected_objects)
 
     def invoke(self, context, event):
-        return context.window_manager.invoke_popup(self, width=300)
+        from ..operators import items as _items_mod
+        _items_mod._tex_groups.clear()
+        _items_mod._tex_current_group = 0
+        if hasattr(context.scene, "optiflow_tex_display"):
+            context.scene.optiflow_tex_display.clear()
+        self.tex_roughness_enabled   = False
+        self.tex_roughness           = 50.0
+        self.tex_metallic_enabled    = False
+        self.tex_metallic            = 50.0
+        self.tex_size_enabled        = False
+        self.tex_size                = '4096'
+        self.tex_compression_enabled = False
+        self.tex_compression         = 'AUTO'
+        self.tex_format_enabled      = False
+        self.tex_format              = 'JPG'
+        return context.window_manager.invoke_props_dialog(self, width=420)
 
     def draw(self, context):
+        from ..operators import items as _items_mod
+        _tex_groups        = _items_mod._tex_groups
+        _tex_current_group = _items_mod._tex_current_group
+
         layout = self.layout
-        layout.label(text="Change Texture \u2014 Work in Progress", icon='IMAGE_DATA')
-        layout.separator()
-        layout.label(text="This feature is not yet implemented.")
+        row = layout.row(align=True)
+        row.operator("optiflow.select_textures", text="Select Texture(s)")
+        if _tex_groups:
+            row.operator("optiflow.clear_textures", text="", icon='X')
+        else:
+            row.operator("optiflow.select_textures", text="", icon='IMPORT')
+        layout.separator(type='LINE')
+        if _tex_groups:
+            group_keys = list(_tex_groups.keys())
+            n_groups   = len(group_keys)
+            group_idx  = max(0, min(_tex_current_group, n_groups - 1))
+
+            if n_groups > 1:
+                display_name = group_keys[group_idx] if group_keys[group_idx] else "\u2014\u2014"
+                count_str    = f"{group_idx + 1:02d}/{n_groups:02d}"
+                row = layout.row(align=True)
+                sub = row.row(align=True)
+                sub.enabled = group_idx > 0
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_LEFT_BAR")
+                op.action = 'FIRST'
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_LEFT")
+                op.action = 'PREV'
+                mid = row.row()
+                mid.alignment = 'CENTER'
+                mid.label(text=f"{display_name} ({count_str})" if group_keys[group_idx] else f"{display_name}")
+                sub = row.row(align=True)
+                sub.enabled = group_idx < n_groups - 1
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT")
+                op.action = 'NEXT'
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT_BAR")
+                op.action = 'LAST'
+                last = row.row(align=True)
+                last.operator("optiflow.remove_tex_group", text="", icon='TRASH')
+
+            layout.template_list(
+                "OPT_UL_tex_list", "",
+                context.scene, "optiflow_tex_display",
+                context.scene, "optiflow_tex_display_index",
+                rows=6,
+            )
+            for label, enabled_prop, value_prop, slider in [
+                ("Roughness:", "tex_roughness_enabled", "tex_roughness",       True),
+                ("Metallic:",  "tex_metallic_enabled",  "tex_metallic",        True),
+                ("Size:",      "tex_size_enabled",      "tex_size",            False),
+                ("Compression:", "tex_compression_enabled", "tex_compression", False),
+                ("Format:",    "tex_format_enabled",    "tex_format",          False),
+            ]:
+                split = layout.split(factor=0.23)
+                split.label(text=label)
+                row = split.row(align=True)
+                row.prop(self, enabled_prop, text="", icon="DOT", toggle=True)
+                sub = row.row(align=True)
+                sub.enabled = getattr(self, enabled_prop)
+                sub.prop(self, value_prop, text="", slider=slider)
+
+    def execute(self, context):
+        from ..operators import items as _items_mod
+        from ..operators.tex_import import schedule_tex_import
+        from ..core.helpers import get_prefix
+
+        _tex_groups        = _items_mod._tex_groups
+        _tex_current_group = _items_mod._tex_current_group
+        _classify_tex      = _items_mod._classify_tex
+
+        scene = context.scene
+        overrides = {
+            'roughness_enabled':   bool(self.tex_roughness_enabled),
+            'roughness':           float(self.tex_roughness),
+            'metallic_enabled':    bool(self.tex_metallic_enabled),
+            'metallic':            float(self.tex_metallic),
+            'size_enabled':        bool(self.tex_size_enabled),
+            'size':                str(self.tex_size),
+            'compression_enabled': bool(self.tex_compression_enabled),
+            'compression':         str(self.tex_compression),
+            'format_enabled':      bool(self.tex_format_enabled),
+            'format':              str(self.tex_format),
+        }
+
+        _SKIP = frozenset({'COL', 'PLACER', 'SNAP', 'GUIDE'})
+        mesh_objs = [
+            obj for obj in context.selected_objects
+            if obj.type == 'MESH' and get_prefix(obj) not in _SKIP
+        ]
+        if not mesh_objs:
+            self.report({'ERROR'}, "No valid mesh objects selected")
+            return {'CANCELLED'}
+        if not _tex_groups:
+            self.report({'ERROR'}, "No textures selected")
+            return {'CANCELLED'}
+
+        old_mat_names   = set()
+        old_image_names = set()
+        for obj in mesh_objs:
+            if obj.data:
+                for mat in obj.data.materials:
+                    if mat:
+                        old_mat_names.add(mat.name)
+                        if mat.use_nodes and mat.node_tree:
+                            for node in mat.node_tree.nodes:
+                                if node.type == 'TEX_IMAGE' and node.image:
+                                    old_image_names.add(node.image.name)
+                obj.data.materials.clear()
+
+        overrides['old_mat_names']   = list(old_mat_names)
+        overrides['old_image_names'] = list(old_image_names)
+
+        group_keys  = list(_tex_groups.keys())
+        n_groups    = len(group_keys)
+        n_objs      = len(mesh_objs)
+        group_idx   = max(0, min(_tex_current_group, n_groups - 1))
+        group_paths = _tex_groups[group_keys[group_idx]]
+
+        if n_objs > 1:
+            # Multiple objects: per-object color assignment if more than 1 color available
+            colors = [p for p in group_paths if _classify_tex(os.path.basename(p)) == 'Color']
+            if len(colors) > 1:
+                overrides_mc = {**overrides, 'change_tex': True}
+                schedule_tex_import(-1, -1, [o.name for o in mesh_objs], group_paths, overrides_mc, scene)
+            else:
+                schedule_tex_import(-1, -1, [o.name for o in mesh_objs], group_paths, overrides, scene)
+        else:
+            # Single object: use current navigation group, Color 1 only
+            colors     = [p for p in group_paths if _classify_tex(os.path.basename(p)) == 'Color']
+            shared     = [p for p in group_paths if _classify_tex(os.path.basename(p)) != 'Color']
+            color_path = colors[0] if colors else None
+            tex_paths  = ([color_path] if color_path else []) + shared
+            schedule_tex_import(-1, -1, [mesh_objs[0].name], tex_paths, overrides, scene)
+
+        tag_redraw_all(context)
+        return {'FINISHED'}
 
 class OPTIFLOW_OT_extract_textures(Operator):
     """Extract all textures from selected objects' materials to a folder."""
