@@ -28,8 +28,9 @@ def draw_border(color):
     coords  = [(0, 0), (width, 0), (width, height), (0, height)]
     indices = [(0, 1), (1, 2), (2, 3), (3, 0)]
     batch   = batch_for_shader(shader, 'LINES', {"pos": coords}, indices=indices)
+    pixel_size = bpy.context.preferences.system.pixel_size
     gpu.state.blend_set('ALPHA')
-    gpu.state.line_width_set(10.0)
+    gpu.state.line_width_set(10.0 * pixel_size)
     shader.bind()
     shader.uniform_float("color", color)
     batch.draw(shader)

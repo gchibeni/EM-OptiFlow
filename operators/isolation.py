@@ -5,7 +5,8 @@ from ..viewport import screen
 
 # region Variables
 
-_item_isolate_timer_running = False
+_item_isolate_timer_running   = False
+_isolation_mode_timer_running = False
 
 # endregion
 
@@ -41,6 +42,7 @@ class optiflow_isolate(Operator):
             for obj in context.view_layer.objects:
                 if obj.mode != 'EDIT':
                     obj.hide_viewport = True
+            ensure_isolation_mode_timer()
         scene["optiflow_isolated"]      = True
         scene["optiflow_isolated_mode"] = mode
 
@@ -148,6 +150,35 @@ def disable_item_isolation(context, scene):
 # endregion
 
 # region Timer
+
+def ensure_isolation_mode_timer():
+    """Start the edit-mode watch timer if not already running."""
+    global _isolation_mode_timer_running
+    if not _isolation_mode_timer_running:
+        _isolation_mode_timer_running = True
+        bpy.app.timers.register(_isolation_mode_poll, first_interval=0.1)
+
+
+def _isolation_mode_poll():
+    """Auto-reveal if the user leaves edit mode while isolated."""
+    global _isolation_mode_timer_running
+    try:
+        context = bpy.context
+        scene   = context.scene
+    except Exception:
+        _isolation_mode_timer_running = False
+        return None
+    if not scene.get("optiflow_isolated", False):
+        _isolation_mode_timer_running = False
+        return None
+    if scene.get("optiflow_isolated_mode", "") == 'EDIT_MESH' and context.mode != 'EDIT_MESH':
+        optiflow_reveal.reveal(optiflow_reveal, context, scene)
+        for area in context.window.screen.areas:
+            area.tag_redraw()
+        _isolation_mode_timer_running = False
+        return None
+    return 0.1
+
 
 def ensure_item_isolate_timer():
     """Start the polling timer if not already running."""
