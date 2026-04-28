@@ -170,10 +170,10 @@ def _is_mouse_in_optiflow_panel(context, mouse_x, mouse_y):
 def register():
     """Register scene properties, handlers, and key listener timer."""
     from ..core.properties import FlatEntry, Group, Exporter
-    from ..operators.items import TexDisplayItem
+    from ..operators.items import TexDisplayItem, _on_tex_index_changed
     Scene.show_items            = BoolProperty(name="Items", default=True)
     Scene.optiflow_tex_display       = CollectionProperty(type=TexDisplayItem, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
-    Scene.optiflow_tex_display_index = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_tex_display_index = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'}, update=_on_tex_index_changed)  # type: ignore
     Scene.optiflow_add_obj_path      = StringProperty(name="Object",        default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_add_col_path      = StringProperty(name="Collider",      default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_edit_override_path = StringProperty(name="Override Path", default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore

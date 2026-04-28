@@ -16,6 +16,15 @@ _tex_groups: dict = {}
 _tex_current_group: int = 0
 _tex_btn_mouse_pos: tuple = (0, 0)
 
+# Set to True by the index update callback so the remove operator can detect
+# that a selection change and a button click landed in the same event.
+_tex_index_just_changed: bool = False
+
+
+def _on_tex_index_changed(self, context):
+    global _tex_index_just_changed
+    _tex_index_just_changed = True
+
 # Aliases checked in order — ORM must come before Occlusion because
 # _occlussionroughnessmetallic starts with _occl.
 _TEX_ALIASES = [
@@ -66,6 +75,8 @@ class OPT_UL_tex_list(UIList):
         if index == getattr(active_data, active_propname, -1):
             op = row.operator("optiflow.remove_texture_map", text="", icon="X", emboss=False)
             op.label = item.label
+        else:
+            row.label(text="", icon='BLANK1')
 
     def draw_filter(self, context, layout):
         """Draw the search filter input."""
@@ -242,7 +253,11 @@ class OPT_OT_remove_texture_map(Operator):
     label: StringProperty(options={'HIDDEN'})  # type: ignore
 
     def execute(self, context):
-        global _tex_groups, _tex_current_group
+        global _tex_groups, _tex_current_group, _tex_index_just_changed
+        just_changed = _tex_index_just_changed
+        _tex_index_just_changed = False
+        if just_changed:
+            return {'CANCELLED'}
         if not _tex_groups:
             return {'CANCELLED'}
         filename = self.label.split(": ", 1)[-1] if ": " in self.label else self.label
