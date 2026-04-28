@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import Operator, UIList
 from bpy.props import IntProperty
-from ..core.helpers import rebuild_flat_entries, find_flat_idx, get_active_entry, get_prefix
+from ..core.helpers import rebuild_flat_entries, find_flat_idx, get_active_entry
 from ..core.constants import EXPORTER_ICONS
 
 # region Flat List Helpers
@@ -85,8 +85,6 @@ class OPT_UL_flat(UIList):
         if is_active:
             if not is_group:
                 row.operator("optiflow.edit_item", text="", icon='MODIFIER_ON', emboss=False)
-            if is_group:
-                row.operator("optiflow.select_items", text="", icon='SORT_ASC', emboss=False)
             row.operator("optiflow.duplicate", text="", icon='DUPLICATE', emboss=False)
             row.operator("optiflow.delete",    text="", icon='TRASH',     emboss=False)
             row.separator(factor=2.8)
@@ -136,43 +134,6 @@ class OPT_UL_flat(UIList):
         """Draw the search filter input."""
         row = layout.row()
         row.prop(self, "filter_name", text="")
-
-
-_SELECT_SKIP = frozenset({'COL', 'PLACER', 'SNAP', 'GUIDE'})
-
-
-class OPT_OT_select_items(Operator):
-    """Select viewport objects of all items in the active group, in order."""
-    bl_idname  = "optiflow.select_items"
-    bl_label   = "Select All Items"
-    bl_description = "Select the mesh objects of every item in this group, in order"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context):
-        fe = get_active_entry(context.scene)
-        return fe is not None and fe.entry_type == 'GROUP'
-
-    def execute(self, context):
-        scene = context.scene
-        fe    = get_active_entry(scene)
-        if fe is None or fe.entry_type != 'GROUP':
-            return {'CANCELLED'}
-
-        group = scene.optiflow_groups[fe.group_index]
-
-        bpy.ops.object.select_all(action='DESELECT')
-        first = None
-        for item in group.items:
-            for ref in item.objects:
-                obj = ref.object
-                if obj and obj.type == 'MESH' and get_prefix(obj) not in _SELECT_SKIP:
-                    obj.select_set(True)
-                    if first is None:
-                        first = obj
-        if first:
-            context.view_layer.objects.active = first
-        return {'FINISHED'}
 
 
 class OPT_OT_toggle_expand(Operator):

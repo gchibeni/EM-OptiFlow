@@ -993,7 +993,7 @@ class OPT_OT_delete(Operator):
     """Delete the selected group or item and its exclusive objects."""
     bl_idname  = "optiflow.delete"
     bl_label   = "Delete"
-    bl_description = "Delete the selected item.\nExclusive referenced objects will also be deleted.\n\nCtrl+Click: delete item only, keep objects in scene."
+    bl_description = "Delete the selected item.\nExclusive referenced objects will also be deleted.\nCtrl+Click: delete item only, keep objects in scene."
     bl_options = {'UNDO'}
 
     keep_objects: BoolProperty(default=False, options={'SKIP_SAVE'})  # type: ignore

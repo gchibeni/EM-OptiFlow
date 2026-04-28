@@ -1,8 +1,11 @@
 import bpy
+import time
 from bpy.types import Operator
 from ..core.helpers import (
-    rebuild_flat_entries, find_flat_idx, move_item_between_groups,
+    rebuild_flat_entries, find_flat_idx, move_item_between_groups, get_prefix,
 )
+
+_SELECT_SKIP = frozenset({'COL', 'PLACER', 'SNAP', 'GUIDE'})
 
 # region Cursor
 
@@ -27,7 +30,7 @@ class OPT_OT_item_drag(Operator):
     """Drag to reorder items and groups in the flat list."""
     bl_idname  = "optiflow.item_drag"
     bl_label   = "Drag"
-    bl_description = "Click once, drag up or down to adjust, then click again to confirm"
+    bl_description = "Click once, drag up or down to reorder, then click again to confirm.\nDouble-click to select objects"
     bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
 
     def invoke(self, context, event):
@@ -37,14 +40,16 @@ class OPT_OT_item_drag(Operator):
         if idx < 0 or idx >= len(entries):
             return {'CANCELLED'}
         fe = entries[idx]
-        self._tracked_gi      = fe.group_index
-        self._tracked_ii      = fe.item_index
-        self._is_group_row    = (fe.entry_type == 'GROUP')
-        self._state           = {'last_y': event.mouse_y}
-        self._orig_x          = event.mouse_x
-        self._orig_y          = event.mouse_y
-        self._accum_y         = 0.0
+        self._tracked_gi       = fe.group_index
+        self._tracked_ii       = fe.item_index
+        self._is_group_row     = (fe.entry_type == 'GROUP')
+        self._state            = {'last_y': event.mouse_y}
+        self._orig_x           = event.mouse_x
+        self._orig_y           = event.mouse_y
+        self._accum_y          = 0.0
         self._auto_expanded_gi = -1
+        self._reordered        = False
+        self._invoke_time      = time.time()
         context.window.cursor_set('NONE')
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
@@ -67,13 +72,15 @@ class OPT_OT_item_drag(Operator):
                 context.area.tag_redraw()
 
         elif event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            context.window.cursor_warp(self._orig_x, self._orig_y)
+            context.window.cursor_set('DEFAULT')
+            if not self._reordered and time.time() - self._invoke_time < 0.25:
+                return self._select(context)
             # Collapse auto expanded group if item landed elsewhere
             if not self._is_group_row and self._auto_expanded_gi != -1:
                 if self._tracked_gi != self._auto_expanded_gi:
                     context.scene.optiflow_groups[self._auto_expanded_gi].expanded = False
                     rebuild_flat_entries(context.scene)
-            context.window.cursor_warp(self._orig_x, self._orig_y)
-            context.window.cursor_set('DEFAULT')
             return {'FINISHED'}
 
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
@@ -108,6 +115,7 @@ class OPT_OT_item_drag(Operator):
         scene.optiflow_flat_index = find_flat_idx(
             scene, self._tracked_gi, self._tracked_ii,
         )
+        self._reordered = True
         return True
 
     def _step_up(self, scene):
@@ -136,6 +144,7 @@ class OPT_OT_item_drag(Operator):
         scene.optiflow_flat_index = find_flat_idx(
             scene, self._tracked_gi, self._tracked_ii,
         )
+        self._reordered = True
         return True
 
     def _handle_group_transition(self, scene, leaving_gi, entering_gi):
@@ -147,6 +156,37 @@ class OPT_OT_item_drag(Operator):
         if not groups[entering_gi].expanded:
             groups[entering_gi].expanded = True
             self._auto_expanded_gi = entering_gi
+
+    def _select(self, context):
+        """Select viewport objects for the double-clicked entry."""
+        scene  = context.scene
+        groups = scene.optiflow_groups
+        gi     = self._tracked_gi
+        if gi < 0 or gi >= len(groups):
+            return {'CANCELLED'}
+        bpy.ops.object.select_all(action='DESELECT')
+        first = None
+        if self._is_group_row:
+            for item in groups[gi].items:
+                for ref in item.objects:
+                    obj = ref.object
+                    if obj and obj.type == 'MESH' and get_prefix(obj) not in _SELECT_SKIP:
+                        obj.select_set(True)
+                        if first is None:
+                            first = obj
+        else:
+            ii = self._tracked_ii
+            if ii < 0 or ii >= len(groups[gi].items):
+                return {'CANCELLED'}
+            for ref in groups[gi].items[ii].objects:
+                obj = ref.object
+                if obj and obj.type == 'MESH':
+                    obj.select_set(True)
+                    if first is None:
+                        first = obj
+        if first:
+            context.view_layer.objects.active = first
+        return {'FINISHED'}
 
     def execute(self, context):
         return {'FINISHED'}
