@@ -26,8 +26,10 @@ def sanitize_prefix(name):
 
 
 def strip_trailing_number(name):
-    """Return name with any trailing _N suffix removed."""
-    m = re.match(r'^(.*?)_\d+$', name)
+    """Return name with any trailing uniqueness suffix (_1 through _999) removed.
+    Limits to 3 digits so that long numeric identifiers (e.g. SKU numbers) are preserved.
+    """
+    m = re.match(r'^(.*?)_\d{1,3}$', name)
     return m.group(1) if m else name
 
 

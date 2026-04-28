@@ -166,9 +166,12 @@ def cancel_all():
 
 # ── Phase 1: Background PIL thread ────────────────────────────────────────────
 
-def _select_format(ov, src_ext):
+def _select_format(ov, src_ext, tex_type=None):
     if ov.get('format_enabled'):
-        return _FORMAT_MAP.get(ov['format'], ('JPEG', 'jpg'))
+        fmt = ov['format']
+        if fmt == 'AUTO':
+            return ('PNG', 'png') if tex_type in ('Normal', 'ORM') else ('JPEG', 'jpg')
+        return _FORMAT_MAP.get(fmt, ('JPEG', 'jpg'))
     if src_ext in ('.jpg', '.jpeg'):
         return 'JPEG', 'jpg'
     if src_ext == '.webp':
@@ -176,8 +179,8 @@ def _select_format(ov, src_ext):
     return 'PNG', 'png'
 
 
-def _select_alpha_format(ov, src_ext):
-    pil_format, ext = _select_format(ov, src_ext)
+def _select_alpha_format(ov, src_ext, tex_type=None):
+    pil_format, ext = _select_format(ov, src_ext, tex_type)
     if pil_format == 'JPEG':
         return 'PNG', 'png'
     return pil_format, ext
@@ -274,18 +277,8 @@ def _process_job(job):
                                or orm_sources.get('Occlusion'))
                     stem = _derive_orm_stem(ref_src) + '_ORM'
 
-                    if ov.get('format_enabled'):
-                        pil_format, ext = _FORMAT_MAP.get(ov['format'], ('JPEG', 'jpg'))
-                    else:
-                        orig_ext = os.path.splitext(ref_src)[1].lower()
-                        if orig_ext in ('.jpg', '.jpeg'):
-                            pil_format, ext = 'JPEG', 'jpg'
-                        elif orig_ext == '.png':
-                            pil_format, ext = 'PNG', 'png'
-                        elif orig_ext == '.webp':
-                            pil_format, ext = 'WEBP', 'webp'
-                        else:
-                            pil_format, ext = 'PNG', 'png'
+                    orig_ext = os.path.splitext(ref_src)[1].lower()
+                    pil_format, ext = _select_format(ov, orig_ext, 'ORM')
 
                     compression = 'Uncompressed'
                     if ov.get('compression_enabled'):
@@ -405,7 +398,7 @@ def _process_job(job):
                         img  = resize_image(img, (size, size), keep_aspect=True)
 
                     orig_ext = os.path.splitext(src_path)[1].lower()
-                    pil_format, ext = _select_format(ov, orig_ext)
+                    pil_format, ext = _select_format(ov, orig_ext, tex_type)
 
                     compression = 'Uncompressed'
                     if ov.get('compression_enabled'):

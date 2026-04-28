@@ -171,6 +171,7 @@ def register():
     """Register scene properties, handlers, and key listener timer."""
     from ..core.properties import FlatEntry, Group, Exporter
     from ..operators.items import TexDisplayItem, _on_tex_index_changed
+    from ..operators.auto_fill import _on_autofill_url_change
     Scene.show_items            = BoolProperty(name="Items", default=True)
     Scene.optiflow_tex_display       = CollectionProperty(type=TexDisplayItem, options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_tex_display_index = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'}, update=_on_tex_index_changed)  # type: ignore
@@ -189,6 +190,9 @@ def register():
     Scene.optiflow_origin_wip   = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
     Scene.optiflow_is_importing  = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
     Scene.optiflow_tex_progress = FloatProperty(name="", default=0.0, min=0.0, max=1.0, options={'HIDDEN', 'SKIP_SAVE'})
+    Scene.optiflow_autofill_url  = StringProperty(name="Spreadsheet URL or ID", options={'HIDDEN'}, update=_on_autofill_url_change)  # type: ignore
+    Scene.optiflow_autofill_file = StringProperty(name="File Path", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_autofill_tab  = StringProperty(name="Last Sheet Tab", options={'HIDDEN'})  # type: ignore
     bpy.types.WindowManager.optiflow_ctrl_held = BoolProperty(
         default=False, options={'HIDDEN', 'SKIP_SAVE'},
     )
@@ -217,6 +221,7 @@ def unregister():
         "optiflow_add_obj_path", "optiflow_add_col_path",
         "optiflow_edit_override_path", "optiflow_extract_tex_dir",
         "optiflow_is_importing", "optiflow_tex_progress",
+        "optiflow_autofill_url", "optiflow_autofill_file", "optiflow_autofill_tab",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)

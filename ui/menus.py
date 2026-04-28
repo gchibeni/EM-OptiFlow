@@ -209,7 +209,12 @@ class OPTIFLOW_OT_change_textures(Operator):
     tex_format_enabled: BoolProperty(name="Toggle Reformat", default=False)  # type: ignore
     tex_format: EnumProperty(
         name="Format",
-        items=[('JPG', 'JPG', ''), ('PNG', 'PNG', ''), ('WEBP', 'WEBP', '')],
+        items=[
+            ('AUTO', 'Auto', ''),
+            ('JPG',  'JPG',  ''),
+            ('PNG',  'PNG',  ''),
+            ('WEBP', 'WEBP', ''),
+        ],
     )  # type: ignore
 
     @classmethod

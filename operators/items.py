@@ -602,8 +602,9 @@ class OPT_OT_add_item(Operator):
     tex_format: EnumProperty(
         name="Format",
         items=[
-            ('JPG', 'JPG', ''),
-            ('PNG', 'PNG', ''),
+            ('AUTO', 'Auto', ''),
+            ('JPG',  'JPG',  ''),
+            ('PNG',  'PNG',  ''),
             ('WEBP', 'WEBP', ''),
         ],
     )  # type: ignore
