@@ -1,5 +1,6 @@
 import bpy
 import os
+import uuid
 from bpy.types import Operator
 from datetime import date
 
@@ -120,6 +121,66 @@ def export_file(filepath, exporter):
             )
 
 
+def _temp_mat_name():
+    return f"__tmp_{uuid.uuid4().hex[:8]}__"
+
+
+def _rename_item_materials(item):
+    """Before export: rename this item's materials to Mat, Mat_1, Mat_2…
+    Any scene material that already holds a target name is moved to a temp name.
+    Returns {mat: original_name} for every touched material."""
+    item_mats = []
+    seen_ids = set()
+    for ref in item.objects:
+        obj = ref.object
+        if obj is None or obj.type != 'MESH':
+            continue
+        for slot in obj.material_slots:
+            mat = slot.material
+            if mat is None or mat.name == 'ColMat' or id(mat) in seen_ids:
+                continue
+            seen_ids.add(id(mat))
+            item_mats.append(mat)
+
+    if not item_mats:
+        return {}
+
+    target_names = ['Mat'] + [f'Mat_{i}' for i in range(1, len(item_mats))]
+    restore = {}
+
+    # Move scene materials that already hold a target name out of the way.
+    for target in target_names:
+        existing = bpy.data.materials.get(target)
+        if existing is not None and id(existing) not in seen_ids:
+            restore[existing] = existing.name
+            existing.name = _temp_mat_name()
+
+    # Move item materials to temp names first to free their current names,
+    # then assign the sequential target names.
+    for mat in item_mats:
+        restore[mat] = mat.name
+        mat.name = _temp_mat_name()
+    for mat, target in zip(item_mats, target_names):
+        mat.name = target
+
+    return restore
+
+
+def _restore_material_names(restore):
+    """After export: restore all renamed materials to their original names."""
+    if not restore:
+        return
+    # Two-pass: move everything to unique temps first to avoid cross-conflicts,
+    # then restore to originals.
+    temps = {}
+    for mat in restore:
+        t = _temp_mat_name()
+        temps[mat] = t
+        mat.name = t
+    for mat, orig in restore.items():
+        mat.name = orig
+
+
 def export_item(item, exporter, export_dir):
     """Export a single item as one file into export_dir."""
     objs = select_item_objects(item)
@@ -129,7 +190,11 @@ def export_item(item, exporter, export_dir):
     filename = build_item_filename(item.name, prefix, exporter)
     os.makedirs(export_dir, exist_ok=True)
     filepath = os.path.join(export_dir, filename)
-    export_file(filepath, exporter)
+    restore = _rename_item_materials(item)
+    try:
+        export_file(filepath, exporter)
+    finally:
+        _restore_material_names(restore)
 
 
 def export_group(group, exporter, scene):
