@@ -42,9 +42,9 @@ jobs:
 
             - name: Download mozjpeg-lossless-optimization wheels
               run: |
-                  pip download mozjpeg-lossless-optimization --dest ./wheels --only-binary=:all: --python-version=3.11 --platform win_amd64 || true
-                  pip download mozjpeg-lossless-optimization --dest ./wheels --only-binary=:all: --python-version=3.11 --platform manylinux2014_x86_64 || true
-                  pip download mozjpeg-lossless-optimization --dest ./wheels --only-binary=:all: --python-version=3.11 --platform macosx_10_9_x86_64 || true
+                  pip download "mozjpeg-lossless-optimization==0.2.0" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.6 --implementation cp --abi abi3 --platform win_amd64
+                  pip download "mozjpeg-lossless-optimization==0.2.0" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.6 --implementation cp --abi abi3 --platform manylinux_2_17_x86_64
+                  pip download "mozjpeg-lossless-optimization==0.2.0" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.6 --implementation cp --abi abi3 --platform macosx_10_9_x86_64
 
             - name: Inject Google credentials
               run: echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
