@@ -427,6 +427,16 @@ def _process_job(job):
                         img = adjust_reflectivity(img, ov['roughness'] / 100.0)
                     elif tex_type == 'Metallic' and ov.get('metallic_enabled'):
                         img = adjust_reflectivity(img, ov['metallic'] / 100.0)
+                    elif tex_type == 'ORM' and (ov.get('roughness_enabled') or ov.get('metallic_enabled')):
+                        # Adjust G (roughness) and/or B (metallic) channels in-place
+                        from PIL import Image as PILImage
+                        img = img.convert('RGB')
+                        r, g, b = img.split()
+                        if ov.get('roughness_enabled'):
+                            g = adjust_reflectivity(g, ov['roughness'] / 100.0)
+                        if ov.get('metallic_enabled'):
+                            b = adjust_reflectivity(b, ov['metallic'] / 100.0)
+                        img = PILImage.merge('RGB', (r, g, b))
 
                     if ov.get('size_enabled'):
                         size = int(ov['size'])

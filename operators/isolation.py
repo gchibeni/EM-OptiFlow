@@ -120,21 +120,22 @@ class optiflow_isolate_items(Operator):
 
 
 def apply_item_isolation(context, scene):
-    """Show only objects belonging to the currently selected item."""
+    """Show only objects belonging to the currently selected item or group."""
     entries = scene.optiflow_flat_entries
     idx     = scene.optiflow_flat_index
     groups  = scene.optiflow_groups
     visible_ptrs = set()
     if 0 <= idx < len(entries):
         fe = entries[idx]
-        if fe.item_index >= 0:
-            try:
-                item = groups[fe.group_index].items[fe.item_index]
+        try:
+            group = groups[fe.group_index]
+            items_to_show = [group.items[fe.item_index]] if fe.item_index >= 0 else list(group.items)
+            for item in items_to_show:
                 for ref in item.objects:
                     if ref.object is not None:
                         visible_ptrs.add(ref.object.as_pointer())
-            except (IndexError, KeyError):
-                pass
+        except (IndexError, KeyError):
+            pass
     for obj in context.view_layer.objects:
         obj.hide_viewport = obj.as_pointer() not in visible_ptrs
 

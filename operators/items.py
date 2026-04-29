@@ -27,10 +27,11 @@ def _on_tex_index_changed(self, context):
     _tex_index_just_changed = True
 
 # Aliases checked in order — ORM must come before Occlusion because
-# _occlussionroughnessmetallic starts with _occl.
+# _occlusionroughnessmetallic starts with _occl.
 _TEX_ALIASES = [
     ('Color',        ['_color', '_base', '_diffuse', '-color', '-base', '-diffuse']),
-    ('ORM',          ['_occlussionroughnessmetallic', '_orm', '-occlussionroughnessmetallic', '-orm']),
+    ('ORM',          ['_occlusionroughnessmetallic', '_occlussionroughnessmetallic', '_orm',
+                      '-occlusionroughnessmetallic', '-occlussionroughnessmetallic', '-orm']),
     ('Normal',       ['_norm', '_nrm', '-norm', '-nrm']),
     ('Occlusion',    ['_ao', '_occl', '-ao', '-occl']),
     ('Roughness',    ['_rough', '-rough']),

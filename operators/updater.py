@@ -2,6 +2,8 @@ import bpy
 import urllib.request
 import json
 import threading
+import os
+import tempfile
 from bpy.types import Operator
 
 GITHUB_REPO  = "gchibeni/OptiFlow"
@@ -16,6 +18,9 @@ _state = {
     "latest_version": "",
     "latest_tag": "",
     "manual_pending": False,
+    "download_url": "",
+    "downloading": False,
+    "download_error": "",
 }
 
 _startup_check_done = False
@@ -60,6 +65,11 @@ def _fetch_update():
         tag = data.get("tag_name", "")
         latest = _parse_version(tag)
         current = _get_current_version()
+        assets = data.get("assets", [])
+        download_url = next(
+            (a.get("browser_download_url", "") for a in assets if a.get("name", "").endswith(".zip")),
+            data.get("zipball_url", ""),
+        )
         _state = {
             "checked": True,
             "checking": False,
@@ -67,6 +77,9 @@ def _fetch_update():
             "latest_version": ".".join(str(x) for x in latest),
             "latest_tag": tag,
             "manual_pending": False,
+            "download_url": download_url,
+            "downloading": False,
+            "download_error": "",
         }
     except Exception:
         _state = {
@@ -76,6 +89,9 @@ def _fetch_update():
             "latest_version": "",
             "latest_tag": "",
             "manual_pending": False,
+            "download_url": "",
+            "downloading": False,
+            "download_error": "",
         }
 
     def _on_done():
@@ -90,6 +106,61 @@ def _fetch_update():
 def check_for_updates_async():
     _state["checking"] = True
     threading.Thread(target=_fetch_update, daemon=True).start()
+
+
+def _download_and_install(download_url):
+    """Download the release zip from GitHub and install it as a Blender extension."""
+    global _state
+    try:
+        req = urllib.request.Request(
+            download_url,
+            headers={"User-Agent": "OptiFlow-Blender-Addon"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            zip_data = resp.read()
+
+        fd, temp_path = tempfile.mkstemp(suffix='.zip', prefix='optiflow_update_')
+        try:
+            os.write(fd, zip_data)
+        finally:
+            os.close(fd)
+
+        def _install_on_main():
+            global _state
+            error = None
+            try:
+                bpy.ops.extensions.package_install_files(
+                    filepath=temp_path,
+                    enable_on_install=True,
+                )
+            except Exception as e:
+                error = str(e)
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+            _state["downloading"] = False
+            if error:
+                _state["download_error"] = error
+                def _show_err(self_menu, context):
+                    self_menu.layout.label(text="Update failed:", icon='ERROR')
+                    self_menu.layout.label(text=error[:80])
+                bpy.context.window_manager.popup_menu(_show_err, title="OptiFlow Update")
+            else:
+                def _show_ok(self_menu, context):
+                    self_menu.layout.label(text="OptiFlow updated successfully!")
+                    self_menu.layout.label(text="Restart Blender to apply the changes.")
+                bpy.context.window_manager.popup_menu(_show_ok, title="OptiFlow Update")
+            _redraw_view3d()
+            return None
+
+        bpy.app.timers.register(_install_on_main, first_interval=0.0)
+
+    except Exception as e:
+        _state["downloading"] = False
+        _state["download_error"] = str(e)
+        bpy.app.timers.register(_redraw_view3d, first_interval=0.0)
 
 
 @bpy.app.handlers.persistent
@@ -124,13 +195,20 @@ class OPTIFLOW_OT_open_preferences(Operator):
 
 
 class OPTIFLOW_OT_confirm_update(Operator):
-    """Opens the latest release page to download the update."""
+    """Downloads and installs the latest OptiFlow release."""
     bl_idname = "optiflow.confirm_update"
     bl_label = "Update Available"
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
-        bpy.ops.wm.url_open(url=RELEASES_URL)
+        download_url = _state.get("download_url", "")
+        if not download_url:
+            bpy.ops.wm.url_open(url=RELEASES_URL)
+            return {'FINISHED'}
+        _state["downloading"] = True
+        _state["download_error"] = ""
+        threading.Thread(target=_download_and_install, args=(download_url,), daemon=True).start()
+        self.report({'INFO'}, "Downloading OptiFlow update...")
         return {'FINISHED'}
 
     def invoke(self, context, event):
@@ -144,7 +222,7 @@ class OPTIFLOW_OT_confirm_update(Operator):
         layout.separator(factor=0.3)
         col = layout.column(align=True)
         col.label(text=f"A new version ({ver}) was found in the repositories.")
-        col.label(text="Do you want to update?")
+        col.label(text="Do you want to download and install it now?")
         layout.separator(factor=0.3)
 
 
