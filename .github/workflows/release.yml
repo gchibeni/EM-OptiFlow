@@ -23,12 +23,20 @@ jobs:
             - name: Download Pillow wheels
               run: |
                   mkdir -p wheels
-                  pip download Pillow --dest ./wheels --only-binary=:all: --python-version=3.11 --platform win_amd64
-                  pip download Pillow --dest ./wheels --only-binary=:all: --python-version=3.11 --platform win_arm64
-                  pip download Pillow --dest ./wheels --only-binary=:all: --python-version=3.11 --platform manylinux2014_x86_64
-                  pip download Pillow --dest ./wheels --only-binary=:all: --python-version=3.11 --platform manylinux2014_aarch64
-                  pip download Pillow --dest ./wheels --only-binary=:all: --python-version=3.11 --platform macosx_11_0_arm64
-                  pip download Pillow --dest ./wheels --only-binary=:all: --python-version=3.11 --platform macosx_10_13_x86_64
+                  # Python 3.11 — Blender 4.2 through 5.0
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.11 --platform win_amd64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.11 --platform win_arm64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.11 --platform manylinux2014_x86_64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.11 --platform manylinux2014_aarch64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.11 --platform macosx_11_0_arm64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.11 --platform macosx_10_13_x86_64
+                  # Python 3.13 — Blender 5.1+
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.13 --platform win_amd64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.13 --platform win_arm64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.13 --platform manylinux_2_28_x86_64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.13 --platform manylinux_2_28_aarch64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.13 --platform macosx_11_0_arm64
+                  pip download "Pillow==12.1.1" --dest ./wheels --only-binary=:all: --python-version=3.13 --platform macosx_10_13_x86_64
 
             - name: Download mozjpeg-lossless-optimization wheels
               run: |
