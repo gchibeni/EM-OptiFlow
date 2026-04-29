@@ -1,5 +1,6 @@
 import bpy
 import os
+import re
 from bpy.types import Operator, PropertyGroup, UIList
 from bpy.props import StringProperty, EnumProperty, IntProperty, BoolProperty, FloatProperty, CollectionProperty
 from ..core import constants, helpers
@@ -483,15 +484,51 @@ def _mark_colliders(objs):
             obj.data.name = tmp
 
 
-def _derive_name_from_color(color_path):
-    """Strip recognized color-type suffixes from a texture filename to form an item name."""
-    stem = os.path.splitext(os.path.basename(color_path))[0]
-    for suffix in ('_basecolor', '-basecolor', '_color', '-color', '_diffuse', '-diffuse'):
-        idx = stem.lower().find(suffix)
+_SPLIT_RE = re.compile(r'[-_\s]+')
+_COLOR_SUFFIXES  = ('_basecolor', '-basecolor', '_color', '-color', '_diffuse', '-diffuse')
+_LAYOUT_SUFFIXES = ('-uniform', '_uniform', '-offset', '_offset')
+
+
+def _stem_without_suffix(path):
+    """Return the filename stem with extension, color-type, and layout suffixes removed."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    for suf in _COLOR_SUFFIXES:
+        idx = stem.lower().find(suf)
         if idx != -1:
             stem = stem[:idx]
             break
-    return helpers.sanitize_name(stem)
+    lower = stem.lower()
+    for suf in _LAYOUT_SUFFIXES:
+        if lower.endswith(suf):
+            stem = stem[:-len(suf)]
+            break
+    return stem
+
+
+def _derive_name_from_color(color_path, color_paths=None):
+    """Derive item name from the color texture filename.
+
+    color_paths must contain ONLY color textures (no normal/roughness maps).
+    Tokens present in every color stem are treated as group-wide noise and
+    removed. Falls back to suffix-only removal when the unique part is ≤ 3 chars.
+    """
+    color_stem = _stem_without_suffix(color_path)
+
+    if color_paths and len(color_paths) > 1:
+        all_stems  = [_stem_without_suffix(p) for p in color_paths]
+        token_sets = [set(_SPLIT_RE.split(s.lower())) - {''} for s in all_stems]
+
+        common = token_sets[0]
+        for ts in token_sets[1:]:
+            common &= ts
+
+        if common:
+            color_tokens = [t for t in _SPLIT_RE.split(color_stem) if t]
+            kept = [t for t in color_tokens if t.lower() not in common]
+            if kept and len('-'.join(kept)) > 3:
+                return helpers.sanitize_name('-'.join(kept))
+
+    return helpers.sanitize_name(color_stem)
 
 
 def _next_new_object_name(group):
@@ -757,12 +794,12 @@ class OPT_OT_add_item(Operator):
         name = ""
         tex_paths = []
         if _tex_groups:
-            group_keys = list(_tex_groups.keys())
-            tex_paths  = _tex_groups[group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]]
-            for p in tex_paths:
-                if _classify_tex(os.path.basename(p)) == 'Color':
-                    name = _derive_name_from_color(p)
-                    break
+            group_keys  = list(_tex_groups.keys())
+            tex_paths   = _tex_groups[group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]]
+            color_paths = [p for p in tex_paths if _classify_tex(os.path.basename(p)) == 'Color']
+            for p in color_paths:
+                name = _derive_name_from_color(p, color_paths)
+                break
         if not name:
             name = _next_new_object_name(group)
 
@@ -840,7 +877,7 @@ class OPT_OT_add_item(Operator):
             _add_item(context, group, 'PRESET', self.item_preset, [], _next_new_object_name(group), self.item_alias)
             return
         for color_path in colors:
-            name = _derive_name_from_color(color_path) or _next_new_object_name(group)
+            name = _derive_name_from_color(color_path, colors) or _next_new_object_name(group)
             _add_item(context, group, 'PRESET', self.item_preset, [], name, self.item_alias)
 
 # endregion
@@ -1054,6 +1091,83 @@ class OPT_OT_delete(Operator):
 
 # endregion
 
+# region Set Preset
+
+class OPT_OT_set_preset(Operator):
+    """Apply a mesh preset to all selected items, keeping their original materials."""
+    bl_idname   = "optiflow.set_preset"
+    bl_label    = "Set as Preset"
+    bl_description = "Change the mesh preset of all selected items"
+    bl_options  = {'REGISTER', 'UNDO'}
+
+    preset: EnumProperty(
+        name="Mesh",
+        items=lambda self, ctx: constants.MESH_TYPE,
+    )  # type: ignore
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=280, confirm_text="Change")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "preset")
+        layout.separator(type="LINE")
+
+    def execute(self, context):
+        mesh_objs = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if not mesh_objs:
+            self.report({'WARNING'}, "No mesh objects selected.")
+            return {'CANCELLED'}
+
+        template_mesh = _import_template_mesh(self.preset)
+        if template_mesh is None:
+            self.report({'ERROR'}, f"Preset mesh template '{self.preset}' not found.")
+            return {'CANCELLED'}
+
+        # Build a map of object pointer → (gi, ii) for OptiFlow items
+        scene     = context.scene
+        obj_to_item = {}
+        for gi, group in enumerate(scene.optiflow_groups):
+            for ii, item in enumerate(group.items):
+                for ref in item.objects:
+                    if ref.object is not None:
+                        obj_to_item[ref.object.as_pointer()] = (gi, ii)
+
+        updated_items = set()
+        for obj in mesh_objs:
+            old_materials  = [slot.material for slot in obj.material_slots]
+            old_mesh       = obj.data
+            old_mesh.name  = f"__del_{old_mesh.name}"
+            new_mesh       = template_mesh.copy()
+            new_mesh.name  = obj.name
+            obj.data       = new_mesh
+            obj.data.materials.clear()
+            for mat in old_materials:
+                obj.data.materials.append(mat)
+            if old_mesh.users == 0:
+                bpy.data.meshes.remove(old_mesh)
+
+            key = obj.as_pointer()
+            if key in obj_to_item:
+                gi, ii = obj_to_item[key]
+                updated_items.add((gi, ii))
+
+        for gi, ii in updated_items:
+            item           = scene.optiflow_groups[gi].items[ii]
+            item.item_type = 'PRESET'
+            item.preset    = self.preset
+
+        if updated_items:
+            helpers.rebuild_flat_entries(scene)
+
+        if template_mesh.users == 0:
+            bpy.data.meshes.remove(template_mesh)
+
+        self.report({'INFO'}, f"Applied preset '{self.preset}' to {len(mesh_objs)} object(s).")
+        return {'FINISHED'}
+
+# endregion
+
 # region Mesh Templates
 
 def _import_template_mesh(preset_type):
@@ -1101,11 +1215,12 @@ def _apply_preset(context, item, preset_type):
     else:
         # Replace mesh data preserving materials
         for ref, obj in mesh_refs:
-            old_materials = [slot.material for slot in obj.material_slots]
-            old_mesh      = obj.data
-            new_mesh      = template_mesh.copy()
-            new_mesh.name = obj.name
-            obj.data      = new_mesh
+            old_materials  = [slot.material for slot in obj.material_slots]
+            old_mesh       = obj.data
+            old_mesh.name  = f"__del_{old_mesh.name}"
+            new_mesh       = template_mesh.copy()
+            new_mesh.name  = obj.name
+            obj.data       = new_mesh
             obj.data.materials.clear()
             for mat in old_materials:
                 obj.data.materials.append(mat)

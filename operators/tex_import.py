@@ -28,6 +28,7 @@ _bpy_queue        = []    # list[_BpyTask] ready to load into Blender
 _bpy_done         = 0     # individual textures loaded into Blender so far
 _timer_registered = False
 _cleanup_pending  = False
+_last_material_assignments: dict = {}  # obj_name → mat_name, used to recover after redo
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -63,9 +64,11 @@ class _TexJob:
         'bpy_remaining',  # int — Blender tasks left before material can be built
         'bpy_images',     # dict[str, list[bpy.types.Image]]
         'first_error',    # str | None
+        'deferred',       # bool — skip auto material build; caller calls apply_deferred_job()
+        'cancelled',      # bool — abort remaining work, skip material build
     )
 
-    def __init__(self, gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type):
+    def __init__(self, gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type, deferred=False):
         self.gi             = gi
         self.ii             = ii
         self.mesh_obj_names = mesh_obj_names
@@ -75,6 +78,8 @@ class _TexJob:
         self.bpy_remaining  = sum(len(v) for v in tex_by_type.values())
         self.bpy_images     = {}
         self.first_error    = None
+        self.deferred       = deferred
+        self.cancelled      = False
 
 
 class _BpyTask:
@@ -89,21 +94,12 @@ class _BpyTask:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def schedule_tex_import(gi, ii, mesh_obj_names, src_paths, overrides, scene):
-    """
-    Kick off async PIL processing + Blender material application for one item.
-
-    gi / ii           — group / item indices in scene.optiflow_groups
-    mesh_obj_names    — names of MESH objects belonging to this item
-    src_paths         — flat list of texture file paths
-    overrides         — dict with roughness/metallic/size/compression/format flags+values
-    scene             — current bpy.types.Scene (for progress tracking)
-    """
+def _setup_job(gi, ii, mesh_obj_names, src_paths, overrides, scene, deferred=False):
+    """Classify textures, create a _TexJob, start its PIL thread. Returns the job or None."""
     global _pil_total, _active_threads, _timer_registered
 
     from ..operators.items import _classify_tex
 
-    # Classify and filter
     tex_by_type = {}
     for path in src_paths:
         t = _classify_tex(os.path.basename(path))
@@ -111,7 +107,7 @@ def schedule_tex_import(gi, ii, mesh_obj_names, src_paths, overrides, scene):
             tex_by_type.setdefault(t, []).append(path)
 
     tex_by_type.pop('Height', None)
-    tex_by_type.pop('Mask', None)
+    tex_by_type.pop('Mask',   None)
 
     if 'ORM' in tex_by_type:
         tex_by_type.pop('Occlusion', None)
@@ -122,7 +118,7 @@ def schedule_tex_import(gi, ii, mesh_obj_names, src_paths, overrides, scene):
         tex_by_type.pop('Reflection')
 
     if not tex_by_type:
-        return
+        return None
 
     has_orm_components = any(t in tex_by_type for t in _ORM_COMPONENT_TYPES)
     has_opacity_merge  = 'Color' in tex_by_type and 'Opacity' in tex_by_type
@@ -132,8 +128,9 @@ def schedule_tex_import(gi, ii, mesh_obj_names, src_paths, overrides, scene):
         tex_count       -= component_count - 1
     if has_opacity_merge:
         tex_count -= len(tex_by_type['Opacity'])
-    temp_dir  = tempfile.mkdtemp(prefix='optiflow_tex_')
-    job       = _TexJob(gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type)
+
+    temp_dir = tempfile.mkdtemp(prefix='optiflow_tex_')
+    job      = _TexJob(gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type, deferred=deferred)
     if has_orm_components or has_opacity_merge:
         job.bpy_remaining = tex_count
 
@@ -150,6 +147,39 @@ def schedule_tex_import(gi, ii, mesh_obj_names, src_paths, overrides, scene):
         _timer_registered = True
         bpy.app.timers.register(_apply_pending, first_interval=0.2)
 
+    return job
+
+
+def schedule_tex_import(gi, ii, mesh_obj_names, src_paths, overrides, scene):
+    """Kick off async PIL processing + Blender material application for one item."""
+    _setup_job(gi, ii, mesh_obj_names, src_paths, overrides, scene, deferred=False)
+
+
+def schedule_tex_import_deferred(mesh_obj_names, src_paths, overrides, scene):
+    """Start PIL processing without applying materials. Returns the job.
+    Call apply_deferred_job(job, mesh_obj_names) once the item is ready."""
+    return _setup_job(-1, -1, mesh_obj_names, src_paths, overrides, scene, deferred=True)
+
+
+def cancel_job(job):
+    """Cancel a running job: flag it and remove its pending queue tasks."""
+    if job is None:
+        return
+    job.cancelled = True
+    with _lock:
+        _bpy_queue[:] = [t for t in _bpy_queue if t.job is not job]
+
+
+def apply_deferred_job(job, mesh_obj_names):
+    """Build and assign material for a completed deferred job."""
+    if job is None or job.cancelled or job.bpy_remaining > 0:
+        return
+    job.mesh_obj_names = mesh_obj_names
+    try:
+        _build_material_for_job(job)
+    except Exception as e:
+        print(f"[OptiFlow] Deferred material build error: {e}")
+
 
 def cancel_all():
     """Called on addon unregister — clears all pending state."""
@@ -163,6 +193,11 @@ def cancel_all():
         _bpy_done         = 0
         _timer_registered = False
         _cleanup_pending  = False
+
+
+def is_import_active():
+    """Return True while a texture import is in flight."""
+    return _timer_registered or _active_threads > 0
 
 # ── Phase 1: Background PIL thread ────────────────────────────────────────────
 
@@ -229,7 +264,7 @@ def _process_job(job):
         # ORM combination: Roughness→G, Metallic→B, Occlusion→R
         if orm_sources:
             out_path = None
-            failed   = not tex_utils_ok
+            failed   = not tex_utils_ok or job.cancelled
             if not failed:
                 try:
                     from PIL import Image as PILImage
@@ -304,7 +339,7 @@ def _process_job(job):
         # Color + optional opacity merge
         for color_src in color_paths:
             out_path = None
-            failed   = not tex_utils_ok
+            failed   = not tex_utils_ok or job.cancelled
             if not failed:
                 try:
                     from PIL import Image as PILImage
@@ -370,7 +405,7 @@ def _process_job(job):
         # All other texture types processed individually
         for tex_type, src_path in other_tasks:
             out_path = None
-            failed   = not tex_utils_ok
+            failed   = not tex_utils_ok or job.cancelled
 
             if not failed:
                 try:
@@ -445,16 +480,16 @@ def _apply_pending():
         threads_left = _active_threads
 
     if task is not None:
-        _load_bpy_task(task)
+        if not task.job.cancelled:
+            _load_bpy_task(task)
+            if task.job.bpy_remaining == 0 and not task.job.deferred:
+                try:
+                    _build_material_for_job(task.job)
+                except Exception as e:
+                    print(f"[OptiFlow] Material build error for [{task.job.gi}][{task.job.ii}]: {e}")
         with _lock:
             _bpy_done += 1
             bpy_done = _bpy_done
-
-        if task.job.bpy_remaining == 0:
-            try:
-                _build_material_for_job(task.job)
-            except Exception as e:
-                print(f"[OptiFlow] Material build error for [{task.job.gi}][{task.job.ii}]: {e}")
     else:
         with _lock:
             bpy_done = _bpy_done
@@ -479,7 +514,7 @@ def _load_bpy_task(task):
     """Load one temp file into Blender. Always decrements job.bpy_remaining."""
     job = task.job
     try:
-        if not task.failed and task.temp_path and os.path.exists(task.temp_path):
+        if not task.failed and not job.cancelled and task.temp_path and os.path.exists(task.temp_path):
             colorspace = 'Non-Color' if task.tex_type in _NON_COLOR_TYPES else 'sRGB'
             bpy_img = bpy.data.images.load(task.temp_path)
             try:
@@ -517,6 +552,8 @@ def _tag_redraw_all():
 
 def _build_material_for_job(job):
     """Build and assign Principled BSDF material once all images for a job are loaded."""
+    if job.cancelled:
+        return
     if not job.bpy_images:
         if job.first_error:
             print(f"[OptiFlow] All textures failed for [{job.gi}][{job.ii}]: {job.first_error}")
@@ -587,6 +624,7 @@ def _unique_mat_name(base='Mat'):
 def _assign_material(obj, mat):
     obj.data.materials.clear()
     obj.data.materials.append(mat)
+    _last_material_assignments[obj.name] = mat.name
 
 
 def _build_material(bpy_images, color_img, overrides):

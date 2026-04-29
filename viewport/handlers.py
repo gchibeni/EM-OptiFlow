@@ -64,7 +64,13 @@ def _on_depsgraph_update(scene, depsgraph):
 def _on_undo_redo(dummy):
     """Sync isolation borders after undo or redo."""
     from ..operators.isolation import ensure_item_isolate_timer
+    from ..operators import tex_import as _tex_import
     scene = bpy.context.scene
+    # If undo/redo restored the importing flag but no import is running, clear it.
+    # This prevents the progress bar from getting stuck at 0% after redo.
+    if scene.optiflow_is_importing and not _tex_import.is_import_active():
+        scene.optiflow_is_importing = False
+        scene.optiflow_tex_progress = 0.0
     if scene.get("optiflow_isolated", False):
         screen.enable_border()
     else:
@@ -74,6 +80,22 @@ def _on_undo_redo(dummy):
         ensure_item_isolate_timer()
     else:
         screen.disable_border(key="item")
+
+
+@persistent
+def _on_redo(dummy):
+    """Re-apply async-created materials to objects that lost them via undo/redo."""
+    from ..operators import tex_import as _tex_import
+    if _tex_import.is_import_active():
+        return
+    assignments = _tex_import._last_material_assignments
+    if not assignments:
+        return
+    for obj_name, mat_name in assignments.items():
+        obj = bpy.data.objects.get(obj_name)
+        mat = bpy.data.materials.get(mat_name)
+        if obj and mat and obj.type == 'MESH' and obj.data and len(obj.data.materials) == 0:
+            obj.data.materials.append(mat)
 
 # endregion
 
@@ -190,9 +212,14 @@ def register():
     Scene.optiflow_origin_wip   = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
     Scene.optiflow_is_importing  = BoolProperty(name="", default=False, options={'HIDDEN', 'SKIP_SAVE'})
     Scene.optiflow_tex_progress = FloatProperty(name="", default=0.0, min=0.0, max=1.0, options={'HIDDEN', 'SKIP_SAVE'})
-    Scene.optiflow_autofill_url  = StringProperty(name="Spreadsheet URL or ID", options={'HIDDEN'}, update=_on_autofill_url_change)  # type: ignore
-    Scene.optiflow_autofill_file = StringProperty(name="File Path", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
-    Scene.optiflow_autofill_tab  = StringProperty(name="Last Sheet Tab", options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_autofill_url        = StringProperty(name="Spreadsheet URL or ID", options={'HIDDEN'}, update=_on_autofill_url_change)  # type: ignore
+    Scene.optiflow_autofill_file       = StringProperty(name="File Path", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_autofill_tab        = StringProperty(name="Last Sheet Tab", options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_autofill_source     = StringProperty(name="Last Source",     default='GOOGLE_SHEETS', options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_autofill_key_name   = StringProperty(name="Last Key Column",  default='',             options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_autofill_header_row = StringProperty(name="Last Header Row",  default='1',            options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_autofill_prefix     = StringProperty(name="Last Prefix",      default='',             options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_autofill_suffix     = StringProperty(name="Last Suffix",      default='',             options={'HIDDEN'})  # type: ignore
     bpy.types.WindowManager.optiflow_ctrl_held = BoolProperty(
         default=False, options={'HIDDEN', 'SKIP_SAVE'},
     )
@@ -201,6 +228,7 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(_on_depsgraph_update)
     bpy.app.handlers.undo_post.append(_on_undo_redo)
     bpy.app.handlers.redo_post.append(_on_undo_redo)
+    bpy.app.handlers.redo_post.append(_on_redo)
 
 
 def unregister():
@@ -210,6 +238,8 @@ def unregister():
     for handler_list in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         if _on_undo_redo in handler_list:
             handler_list.remove(_on_undo_redo)
+    if _on_redo in bpy.app.handlers.redo_post:
+        bpy.app.handlers.redo_post.remove(_on_redo)
     if _on_depsgraph_update in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_on_depsgraph_update)
     if _on_load_post in bpy.app.handlers.load_post:
@@ -222,6 +252,8 @@ def unregister():
         "optiflow_edit_override_path", "optiflow_extract_tex_dir",
         "optiflow_is_importing", "optiflow_tex_progress",
         "optiflow_autofill_url", "optiflow_autofill_file", "optiflow_autofill_tab",
+        "optiflow_autofill_source", "optiflow_autofill_key_name", "optiflow_autofill_header_row",
+        "optiflow_autofill_prefix", "optiflow_autofill_suffix",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)

@@ -73,7 +73,7 @@ class OPT_UL_flat(UIList):
 
     def _draw_item_row(self, row, item_obj, flat_entry, is_active):
         """Render an item row with type icon and inline name."""
-        if not is_active and (item_obj.name == "" or not any(ref.object for ref in item_obj.objects)):
+        if not is_active and ((item_obj.name == "" or not any(ref.object for ref in item_obj.objects)) or "INVALID" in item_obj.name):
             row.alert = True
         row.separator(factor=3.0)
         icon_name = flat_entry.bl_rna.properties['entry_type'].enum_items[flat_entry.entry_type].description

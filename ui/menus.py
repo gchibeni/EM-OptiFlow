@@ -721,6 +721,7 @@ class OPTIFLOW_MT_context_menu(Menu):
         layout.operator("optiflow.ctx_assign_to_item", icon='LINKED')
         layout.operator("optiflow.ctx_unassign_from_item", icon='UNLINKED')
         layout.operator("optiflow.ctx_replace_item", icon='FILE_REFRESH')
+        layout.operator("optiflow.set_preset", icon='MATSHADERBALL')
         layout.separator(type="LINE")
         layout.operator("optiflow.ctx_change_textures", icon='IMAGE_DATA')
         layout.operator("optiflow.ctx_extract_textures", icon='FORCE_TEXTURE')

@@ -7,6 +7,7 @@ import json
 import time
 import socket
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import http.server
@@ -24,6 +25,7 @@ _google_auth_event_ref   = None
 _google_auth_result_ref  = None
 _google_sheet_tabs: list = []
 
+
 _url_last_change           = 0.0
 _url_load_timer_registered = False
 
@@ -37,11 +39,15 @@ def _normalize_for_match(s):
 _NOISE_TOKEN_RE = re.compile(r'^\d+x\d+$|^\d+(\.\d+)?$')
 _DIM_RE         = re.compile(r'^\d+x\d+')
 
-_FINISH_TERMS = frozenset({
-    'matte', 'polished', 'honed', 'glazed', 'grip', 'lappato',
-    'satin', 'chiseled', 'chisseled', 'hammered', 'brushed',
-    'natural', 'silk', 'offset', 'structured', 'textured', 'glossy',
-})
+# Layout/pattern words that appear in group names but carry no semantic signal.
+# Finish and type terms are NOT listed here — they are learned dynamically from
+# whatever is left in the group name after size, shape, and these noise words are removed.
+_GROUP_NOISE_TOKENS = frozenset({'offset', 'uniform'})
+
+# Detects the shape/format column in the sheet by header name.
+# Values from this column are used to classify group tokens as shape signals
+# (e.g. COVEBASE, BULLNOSE) distinct from finish tokens.
+_SHAPE_COL_RE = re.compile(r'\bshape\b|\bformat\b|\bprofile\b', re.I)
 
 _INVALID_KEY_VALUES = frozenset({'n/a', 'none', '-', 'na'})
 
@@ -49,11 +55,11 @@ _FUZZY_MIN_SCORE = 0.25
 
 # Relative importance of each signal; normalised per-item by active weight sum.
 _SIGNAL_WEIGHTS = {
-    'group_finish': 0.30,  # finish from group name — highest confidence
-    'group_size':   0.25,  # dimensions from group name — very reliable
-    'item_color':   0.25,  # discriminating color/style tokens from item name
-    'alias':        0.15,  # collection confirmation from alias
-    'group_other':  0.05,  # remaining group tokens (shape type, etc.)
+    'group_finish': 0.25,  # finish/type from group name (dynamic — no hardcoded terms)
+    'group_size':   0.25,  # NxM dimension tokens from group name
+    'group_shape':  0.20,  # shape/format tokens matched against the sheet (e.g. COVEBASE)
+    'item_color':   0.20,  # item name is the color
+    'alias':        0.10,  # alias is the collection
 }
 
 
@@ -94,13 +100,17 @@ def _find_key_column(headers, key_name):
     return None
 
 
-def _extract_signals(group_name, item_name, alias):
+def _extract_signals(group_name, item_name, alias, shape_vocab=frozenset()):
     """Decompose item fields into typed token signals for weighted scoring.
 
-    group_name  → group_finish (high confidence), group_size (high confidence),
-                  group_other (supplemental: shape type, extra context)
-    item_name   → item_color (after removing size/finish/alias tokens)
-    alias       → alias (collection confirmation)
+    group_name  → group_size   (NxM dimension tokens)
+                  group_shape  (tokens matched against sheet shape vocab, e.g. COVEBASE)
+                  group_finish (everything else minus size, shape, and noise words)
+    item_name   → item_color   (the item name is the color)
+    alias       → alias        (the alias is the collection)
+
+    shape_vocab: collapsed shape values learned from the sheet (passed in from
+                 auto_fill_names_multi so no hardcoding is needed here).
     """
     def _toks(s):
         return frozenset(_normalize_for_match(s).split()) if s else frozenset()
@@ -110,24 +120,15 @@ def _extract_signals(group_name, item_name, alias):
     alias_toks = _toks(alias)
 
     group_size   = frozenset(t for t in group_toks if _DIM_RE.match(t))
-    group_finish = frozenset(t for t in group_toks if t in _FINISH_TERMS)
-    group_other  = group_toks - group_size - group_finish
+    group_shape  = frozenset(t for t in group_toks if t in shape_vocab) - group_size
+    group_finish = group_toks - group_size - group_shape - _GROUP_NOISE_TOKENS
 
-    item_size    = frozenset(t for t in item_toks if _DIM_RE.match(t))
-    item_finish  = frozenset(t for t in item_toks if t in _FINISH_TERMS)
-    # Color: what remains after stripping size, finish, alias overlap, and pure numbers
-    item_color   = frozenset(
-        t for t in item_toks
-        if t not in item_size
-        and t not in item_finish
-        and t not in alias_toks
-        and not _NOISE_TOKEN_RE.match(t)
-    )
+    item_color   = frozenset(t for t in item_toks if not _NOISE_TOKEN_RE.match(t))
 
     return {
         'group_finish': group_finish,
         'group_size':   group_size,
-        'group_other':  group_other,
+        'group_shape':  group_shape,
         'item_color':   item_color,
         'alias':        alias_toks,
     }
@@ -172,8 +173,18 @@ def auto_fill_names_multi(content, items_data, key_col, header_row=1):
         avail = ', '.join(headers[:10]) + ('…' if len(headers) > 10 else '')
         return [''] * len(items_data), f"Column '{key_col}' not found. Available: {avail}"
 
-    status_col  = next((h for h in headers if h.strip().lower() == 'status'), None)
-    match_hdrs  = [h for h in headers if h != actual_key_col]
+    status_col = next((h for h in headers if h.strip().lower() == 'status'), None)
+    match_hdrs = [h for h in headers if h != actual_key_col]
+
+    # Detect shape/format column and build a collapsed vocab.
+    # Sheet values like "Cove Base" are stored collapsed ("covebase") so they match
+    # single-token group names like COVEBASE regardless of word-boundary differences.
+    shape_col   = next((h for h in match_hdrs if _SHAPE_COL_RE.search(h)), None)
+    shape_vocab = frozenset(
+        re.sub(r'\s+', '', _normalize_for_match(row.get(shape_col, '')))
+        for row in rows
+        if shape_col and row.get(shape_col, '').strip()
+    )
 
     active_rows = []
     for row in rows:
@@ -184,6 +195,11 @@ def auto_fill_names_multi(content, items_data, key_col, header_row=1):
             continue
         parts      = [row.get(h, '').strip() for h in match_hdrs if row.get(h, '').strip()]
         row_tokens = frozenset(_normalize_for_match(' '.join(parts)).split())
+        if shape_col:
+            raw_shape = row.get(shape_col, '').strip()
+            if raw_shape:
+                # Add collapsed form so "Cove Base" is reachable as "covebase"
+                row_tokens = row_tokens | {re.sub(r'\s+', '', _normalize_for_match(raw_shape))}
         active_rows.append((key_val, row_tokens))
 
     if not active_rows:
@@ -200,6 +216,7 @@ def auto_fill_names_multi(content, items_data, key_col, header_row=1):
             item_data.get('group_name', ''),
             item_data.get('item_name', ''),
             item_data.get('alias', ''),
+            shape_vocab,
         )
         if not any(signals.values()):
             results.append('')
@@ -495,8 +512,10 @@ def _poll_google_auth():
 
 def _sheet_tab_items(self, context):
     if not _google_sheet_tabs:
-        return [('NONE', '— Load tabs first —', '')]
+        label = 'Loading…' if _url_load_timer_registered else '— Load tabs first —'
+        return [('NONE', label, '')]
     return [(t, t, '') for t in _google_sheet_tabs]
+
 
 # endregion
 
@@ -631,15 +650,6 @@ class optiflow_auto_fill(Operator):
     prefix:     StringProperty(name="Prefix",   description="Optional prefix added before the key value (PREFIX_VALUE)")  # type: ignore
     suffix:     StringProperty(name="Suffix",   description="Optional suffix added after the key value (VALUE_SUFFIX)")   # type: ignore
 
-    method: EnumProperty(
-        name="Method",
-        items=[
-            ('FUZZY', "Fuzzy",       "Fill based on fuzzy matching"),
-            ('AI',    "AI/Semantic", "Fill based on AI-assisted matching (requires internet connection)"),
-        ],
-        default='FUZZY',
-    )  # type: ignore
-
     sheet_tab: EnumProperty(
         name="Sheet",
         items=_sheet_tab_items,
@@ -649,9 +659,7 @@ class optiflow_auto_fill(Operator):
         layout = self.layout
         scene  = context.scene
 
-        row = prop_input(layout, self, "Source:", "source", expand=True)
-        row.separator()
-        row.operator("optiflow.placeholder", text="", icon='LINKED') # Add ChatGPT API Key for Semantic/AI auto-fill
+        prop_input(layout, self, "Source:", "source", expand=True)
         layout.separator(type='LINE')
 
         if self.source == 'TEXT_EDITOR':
@@ -693,8 +701,12 @@ class optiflow_auto_fill(Operator):
                 row.operator("optiflow.google_load_tabs", text="", icon='FILE_REFRESH')
                 row.separator()
                 row.operator("optiflow.google_disconnect", text="", icon='INTERNET_OFFLINE')
-                if _google_sheet_tabs:
-                    prop_input(layout, self, "Sheet:", "sheet_tab")
+                if scene.optiflow_autofill_url.strip():
+                    split = layout.split(factor=0.23)
+                    split.label(text="Sheet:")
+                    row = split.row()
+                    row.enabled = bool(_google_sheet_tabs)
+                    row.prop(self, "sheet_tab", text="")
 
         layout.separator(type='LINE')
         split = layout.split(factor=0.23)
@@ -704,23 +716,18 @@ class optiflow_auto_fill(Operator):
         row.prop(self, "header_row")
         row = layout.row(align=True)
         split = layout.split(factor=0.23)
-        split.label(text="Prefix / Sufix:")
+        split.label(text="Prefix / Suffix:")
         row = split.row(align=True)
         row.prop(self, "prefix", text="")
         row.prop(self, "suffix", text="")
         layout.separator(type='LINE')
-        prop_input(layout, self, "Method:", "method", expand=True)
-        layout.separator(type='LINE')
 
     def execute(self, context):
-        if self.method == 'AI':
-            self.report({'INFO'}, "AI/Semantic matching is not yet implemented.")
-            return {'CANCELLED'}
-
         scene   = context.scene
+        self._save_settings(scene)
         key_col = self.key_name.strip()
-        prefix  = self.prefix.strip()
-        suffix  = self.suffix.strip()
+        prefix  = re.sub(r'[^A-Za-z0-9]', '', self.prefix)
+        suffix  = re.sub(r'[^A-Za-z0-9]', '', self.suffix)
 
         if not key_col:
             self.report({'ERROR'}, "Enter the key column name (e.g. 'SKU').")
@@ -807,12 +814,28 @@ class optiflow_auto_fill(Operator):
         return {'FINISHED'}
 
     def invoke(self, context, event):
-        scene     = context.scene
+        scene = context.scene
+        if scene.optiflow_autofill_source in ('GOOGLE_SHEETS', 'FILE', 'TEXT_EDITOR'):
+            self.source = scene.optiflow_autofill_source
+        self.key_name = scene.optiflow_autofill_key_name
+        self.prefix   = scene.optiflow_autofill_prefix
+        self.suffix   = scene.optiflow_autofill_suffix
+        try:
+            self.header_row = int(scene.optiflow_autofill_header_row)
+        except ValueError:
+            pass
         remembered = scene.optiflow_autofill_tab
         if remembered and remembered in _google_sheet_tabs:
             self.sheet_tab = remembered
         return context.window_manager.invoke_props_dialog(
             self, width=420, confirm_text="Fill"
         )
+
+    def _save_settings(self, scene):
+        scene.optiflow_autofill_source     = self.source
+        scene.optiflow_autofill_key_name   = self.key_name
+        scene.optiflow_autofill_header_row = str(self.header_row)
+        scene.optiflow_autofill_prefix     = self.prefix
+        scene.optiflow_autofill_suffix     = self.suffix
 
 # endregion
