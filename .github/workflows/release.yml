@@ -14,6 +14,8 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
             - name: Set up Python
               uses: actions/setup-python@v5
@@ -81,8 +83,7 @@ jobs:
                   {
                     echo "$HEADER"
                     echo ""
-                    git log "$RANGE" --pretty=format:"%s" --no-merges | awk 'NF {print "- " $0}'
-                    echo ""
+                    git log "$RANGE" --no-merges --pretty=format:"%b" | awk 'NF'
                     echo ""
                     echo "**Full Changelog**: https://github.com/${{ github.repository }}/commits/${CURRENT_TAG}"
                   } > release_notes.md
