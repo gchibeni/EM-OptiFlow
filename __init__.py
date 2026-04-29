@@ -16,7 +16,7 @@ bl_info = {
     "author": "gchibeni",
     "description": "A workflow optimization add-on designed to automate/help on repetitive tasks across the 3D pipeline for optimizations—handling PBR texture acquisition, conversion, compression, standardization, batch imports/exports.",
     "blender": (5, 0, 0),
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),
     "location": "",
     "warning": "",
     "category": "Optimization",
