@@ -73,6 +73,7 @@ def _draw_main(layout, context):
     row.operator("optiflow.open_github", text="GitHub", icon="HOME")
     row.operator("optiflow.open_preferences", text="Settings", icon="TOOL_SETTINGS")
     update_row = row.row()
+    update_row.scale_x = 1.23
     update_row.enabled = not update.get("checking", False)
     update_row.alert = update.get("available", False)
     update_icon = 'PROP_ON' if update.get("available") else 'PREVIEW_LOADING'
@@ -165,10 +166,14 @@ def _draw_import_progress(layout, scene):
         return
     factor = scene.optiflow_tex_progress
     layout.separator(factor=0.5)
-    layout.progress(
+    row = layout.row()
+    row.progress(
         factor=factor,
         text=f"Importing textures... {int(factor * 100)}%",
     )
+    btn = row.row()
+    btn.scale_x = 1.23
+    btn.operator("optiflow.cancel_import", text="", icon='X')
 
 # endregion
 

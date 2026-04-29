@@ -28,6 +28,8 @@ _bpy_queue        = []    # list[_BpyTask] ready to load into Blender
 _bpy_done         = 0     # individual textures loaded into Blender so far
 _timer_registered = False
 _cleanup_pending  = False
+_importing_items  = []    # list[(gi, ii)] for items currently being imported
+_active_jobs      = []    # list[_TexJob] currently in flight (PIL or Blender phase)
 _last_material_assignments: dict = {}  # obj_name → mat_name, used to recover after redo
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -138,6 +140,10 @@ def _setup_job(gi, ii, mesh_obj_names, src_paths, overrides, scene, deferred=Fal
         _pil_total      += tex_count
         _active_threads += 1
 
+    if gi >= 0:
+        _importing_items.append((gi, ii))
+    _active_jobs.append(job)
+
     scene.optiflow_is_importing = True
 
     t = threading.Thread(target=_process_job, args=(job,), daemon=True)
@@ -182,11 +188,15 @@ def apply_deferred_job(job, mesh_obj_names):
 
 
 def cancel_all():
-    """Called on addon unregister — clears all pending state."""
+    """Called on addon unregister — cancels all jobs and clears all pending state."""
     global _pil_done, _pil_total, _active_threads, _bpy_queue, _bpy_done
-    global _timer_registered, _cleanup_pending
+    global _timer_registered, _cleanup_pending, _importing_items, _active_jobs
     with _lock:
+        for job in _active_jobs:
+            job.cancelled = True
         _bpy_queue.clear()
+        _importing_items.clear()
+        _active_jobs.clear()
         _pil_done         = 0
         _pil_total        = 0
         _active_threads   = 0
@@ -198,6 +208,33 @@ def cancel_all():
 def is_import_active():
     """Return True while a texture import is in flight."""
     return _timer_registered or _active_threads > 0
+
+
+def pop_importing_items():
+    """Return and clear the list of (gi, ii) pairs currently being imported."""
+    global _importing_items
+    items = list(_importing_items)
+    _importing_items.clear()
+    return items
+
+
+def _cancel_active():
+    """Atomically mark all active jobs cancelled and drain the bpy queue.
+
+    Does NOT reset thread counters — the timer keeps running and drains naturally,
+    skipping all tasks because job.cancelled is True. Returns (jobs, items) so the
+    caller can purge already-loaded images and remove the added scene objects.
+    """
+    global _bpy_queue, _importing_items, _active_jobs
+    with _lock:
+        jobs  = list(_active_jobs)
+        items = list(_importing_items)
+        for job in jobs:
+            job.cancelled = True
+        _bpy_queue.clear()
+        _importing_items.clear()
+        _active_jobs.clear()
+    return jobs, items
 
 # ── Phase 1: Background PIL thread ────────────────────────────────────────────
 
@@ -541,12 +578,14 @@ def _load_bpy_task(task):
 
 def _reset_state():
     """Reset all module counters and hide the progress bar."""
-    global _pil_done, _pil_total, _bpy_done, _timer_registered, _cleanup_pending
+    global _pil_done, _pil_total, _bpy_done, _timer_registered, _cleanup_pending, _importing_items, _active_jobs
     _cleanup_pending  = False
     _timer_registered = False
     _pil_done  = 0
     _pil_total = 0
     _bpy_done  = 0
+    _importing_items.clear()
+    _active_jobs.clear()
     for scene in bpy.data.scenes:
         scene.optiflow_is_importing = False
         scene.optiflow_tex_progress = 0.0
@@ -738,3 +777,64 @@ def _arrange_mat_nodes(node_tree):
         row           = col_rows.get(x, 0)
         node.location = (x, -row * y_gap)
         col_rows[x]   = row + 1
+
+
+# ── Cancel import operator ────────────────────────────────────────────────────
+
+class OPT_OT_cancel_import(bpy.types.Operator):
+    bl_idname     = "optiflow.cancel_import"
+    bl_label      = "Cancel Import"
+    bl_description = "Cancel texture import and remove the items that were being added"
+    bl_options    = {'INTERNAL'}
+
+    def execute(self, context):
+        from ..core import helpers
+
+        scene  = context.scene
+        groups = scene.optiflow_groups
+
+        # Stop threads / drain queue atomically; get data needed for cleanup
+        jobs, items = _cancel_active()
+
+        # Remove items + their exclusive objects (reverse order avoids index shift)
+        items.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        affected_gis = {gi for gi, _ in items}
+        for gi, ii in items:
+            try:
+                if gi >= len(groups) or ii >= len(groups[gi].items):
+                    continue
+                item = groups[gi].items[ii]
+                to_delete = {
+                    ref.object.as_pointer(): ref.object
+                    for ref in item.objects if ref.object is not None
+                }
+                referenced = helpers.collect_referenced_ptrs(
+                    groups, skip_item_ptr=item.as_pointer(),
+                )
+                groups[gi].items.remove(ii)
+                helpers.delete_unreferenced(to_delete, referenced)
+            except Exception as e:
+                print(f"[OptiFlow] Cancel import: error removing [{gi}][{ii}]: {e}")
+
+        # Remove groups that are now empty because all their items were from this import
+        for gi in sorted(affected_gis, reverse=True):
+            try:
+                if gi < len(groups) and len(groups[gi].items) == 0:
+                    groups.remove(gi)
+            except Exception:
+                pass
+
+        # Purge images that were loaded into Blender but not yet assigned to any material
+        for job in jobs:
+            for img_list in job.bpy_images.values():
+                for img in img_list:
+                    try:
+                        if img and img.users == 0:
+                            bpy.data.images.remove(img)
+                    except Exception:
+                        pass
+
+        _reset_state()
+        helpers.rebuild_flat_entries(scene)
+        helpers.tag_redraw_all(context)
+        return {'FINISHED'}
