@@ -65,8 +65,30 @@ jobs:
                     -x ".idea/*"
                   echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
+            - name: Generate changelog
+              run: |
+                  CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+                  PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -n 1)
+
+                  if [ -n "$PREV_TAG" ]; then
+                    RANGE="${PREV_TAG}..HEAD"
+                    HEADER="## What's Changed since ${PREV_TAG}"
+                  else
+                    RANGE="HEAD"
+                    HEADER="## Changelog"
+                  fi
+
+                  {
+                    echo "$HEADER"
+                    echo ""
+                    git log "$RANGE" --pretty=format:"%s" --no-merges | awk 'NF {print "- " $0}'
+                    echo ""
+                    echo ""
+                    echo "**Full Changelog**: https://github.com/${{ github.repository }}/commits/${CURRENT_TAG}"
+                  } > release_notes.md
+
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
               with:
                   files: ${{ env.ZIP_NAME }}
-                  generate_release_notes: true
+                  body_path: release_notes.md
