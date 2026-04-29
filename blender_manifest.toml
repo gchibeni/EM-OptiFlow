@@ -3,15 +3,15 @@ schema_version = "1.0.0"
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
 id = "optiflow"
-version = "1.0.1"
+version = "1.0.0"
 name = "OptiFlow"
-tagline = "A workflow optimization add-on designed to automate/help on repetitive tasks across the 3D pipeline for optimizations—handling PBR texture acquisition, conversion, compression, standardization, batch imports/exports."
+tagline = "Automate PBR texture acquisition, conversion and compression"
 maintainer = "gchibeni"
 # Supported types: "add-on", "theme"
 type = "add-on"
 
 # Optional link to documentation, support, source files, etc
-# website = "https://extensions.blender.org/add-ons/my-example-package/"
+website = "https://github.com/gchibeni/OptiFlow"
 
 # Optional list defined by Blender and server, see:
 # https://docs.blender.org/manual/en/dev/advanced/extensions/tags.html
@@ -25,13 +25,11 @@ blender_version_min = "4.2.0"
 # License conforming to https://spdx.org/licenses/ (use "SPDX: prefix)
 # https://docs.blender.org/manual/en/dev/advanced/extensions/licenses.html
 license = [
-  "SPDX:GPL-3.0-or-later",
+  "SPDX:MIT",
 ]
-# Optional: required by some licenses.
-# copyright = [
-#   "2002-2024 Developer Name",
-#   "1998 Company Name",
-# ]
+copyright = [
+  "2026 Gabriel R. Chibeni",
+]
 
 # Optional list of supported platforms. If omitted, the extension will be available in all operating systems.
 # platforms = ["windows-x64", "macos-arm64", "linux-x64"]

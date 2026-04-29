@@ -108,6 +108,18 @@ def check_for_updates_async():
     threading.Thread(target=_fetch_update, daemon=True).start()
 
 
+def _find_local_repo():
+    """Return the module name of the first enabled local extension repository."""
+    repos = bpy.context.preferences.extensions.repos
+    for r in repos:
+        if r.enabled and not r.use_remote_url:
+            return r.module
+    for r in repos:
+        if r.enabled:
+            return r.module
+    return None
+
+
 def _download_and_install(download_url):
     """Download the release zip from GitHub and install it as a Blender extension."""
     global _state
@@ -129,8 +141,12 @@ def _download_and_install(download_url):
             global _state
             error = None
             try:
+                repo = _find_local_repo()
+                if repo is None:
+                    raise RuntimeError("No enabled extension repository found in Blender preferences")
                 bpy.ops.extensions.package_install_files(
                     filepath=temp_path,
+                    repo=repo,
                     enable_on_install=True,
                 )
             except Exception as e:
