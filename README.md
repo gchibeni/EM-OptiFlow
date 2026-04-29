@@ -1,6 +1,6 @@
 # OptiFlow
 
-A Blender addon that automates repetitive tasks across the 3D production pipeline — handling asset imports, PBR texture processing, mesh presets, naming standardization, SKU management, and batch exports.
+A Blender addon that automates repetitive tasks across the 3D production pipeline — handling asset imports, PBR texture processing, mesh presets, naming standardization, SKU management, and batch exports. Designed to produce highly optimized assets by compressing and resizing textures with minimal perceptual quality loss, keeping file sizes as small as possible without compromising visual fidelity. By enforcing consistent naming conventions and automating error-prone manual steps, it also reduces human error and makes production reviews faster and more reliable.
 
 **Requires Blender 5.0+**
 
@@ -111,7 +111,7 @@ Additional matching behavior:
 
 | Mode                      | Behavior                                                                                                    |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| **Isolate (object mode)** | Hides all objects except the current selection; white border overlay                                        |
+| **Isolate (object mode)** | Hides all objects except the current selection; red border overlay                                          |
 | **Isolate (edit mode)**   | Hides unselected geometry; auto-reveals when exiting edit mode                                              |
 | **Item Isolate**          | Shows only the selected item's objects; yellow border overlay; automatically follows list selection changes |
 
@@ -143,13 +143,13 @@ A confirmation dialog shows the full file list, flags any files that would be ov
 
 These shortcuts are active while the cursor is over the OptiFlow panel:
 
-| Shortcut         | Action                       |
-| ---------------- | ---------------------------- |
-| `Ctrl+Up / Down` | Navigate the list            |
-| `Ctrl+G`         | Add a new group              |
-| `Ctrl+E`         | Edit the selected item       |
-| `Ctrl+D`         | Duplicate the selected entry |
-| `Ctrl+Del`       | Delete the selected entry    |
+| Shortcut    | Action                       |
+| ----------- | ---------------------------- |
+| `Up / Down` | Navigate the list            |
+| `Ctrl+G`    | Add a new group              |
+| `Ctrl+E`    | Edit the selected item       |
+| `Ctrl+D`    | Duplicate the selected entry |
+| `Ctrl+Del`  | Delete the selected entry    |
 
 ### Update Checker
 
@@ -159,9 +159,9 @@ A background check against the GitHub releases API runs on startup. The indicato
 
 ## Installation
 
-1. Download or clone this repository
+1. Download the latest `.zip` from the [Releases](https://github.com/gchibeni/OptiFlow/releases) page
 2. In Blender, go to **Edit → Preferences → Add-ons → Install from Disk**
-3. Select the folder (Blender 5.0 extension install) or zip the folder first
+3. Select the downloaded `.zip` file
 4. Enable **OptiFlow** in the add-on list
 5. The panel appears in the **3D Viewport sidebar → OptiFlow tab** (or press `N`)
 

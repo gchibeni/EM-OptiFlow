@@ -97,8 +97,11 @@ class PREF_UL_presets(UIList):
             row.label(text="", icon='BLANK1')
         else:
             row.prop(item, "name", text="", emboss=False)
-            op          = row.operator("optiflow.pref_delete_preset", text="", icon='TRASH')
-            op.filename = item.filename
+            if index == getattr(active_data, active_propname, -1):
+                op          = row.operator("optiflow.pref_delete_preset", text="", icon='TRASH', emboss=False)
+                op.filename = item.filename
+            else:
+                row.label(text="", icon='BLANK1')
 
 # endregion
 
