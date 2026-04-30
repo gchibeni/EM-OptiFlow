@@ -42,9 +42,18 @@ jobs:
 
             - name: Download mozjpeg-lossless-optimization wheels
               run: |
-                  pip download "mozjpeg-lossless-optimization==0.2.0" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.6 --implementation cp --abi abi3 --platform win_amd64
-                  pip download "mozjpeg-lossless-optimization==0.2.0" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.6 --implementation cp --abi abi3 --platform manylinux_2_17_x86_64
-                  pip download "mozjpeg-lossless-optimization==0.2.0" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.6 --implementation cp --abi abi3 --platform macosx_10_9_x86_64
+                  # Python 3.11 — Blender 4.2 through 5.0
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.11 --platform win_amd64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.11 --platform manylinux2014_x86_64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.11 --platform manylinux2014_aarch64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.11 --platform macosx_10_9_x86_64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.11 --platform macosx_11_0_arm64
+                  # Python 3.13 — Blender 5.1+
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.13 --platform win_amd64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.13 --platform manylinux2014_x86_64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.13 --platform manylinux2014_aarch64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.13 --platform macosx_10_13_x86_64
+                  pip download "mozjpeg-lossless-optimization==1.3.2" --dest ./wheels --no-deps --only-binary=:all: --python-version=3.13 --platform macosx_11_0_arm64
 
             - name: Inject Google credentials
               run: echo '${{ secrets.GOOGLE_CREDENTIALS }}' > credentials.json
