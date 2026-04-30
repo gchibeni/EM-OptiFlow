@@ -83,7 +83,7 @@ jobs:
 
                   if [ -n "$PREV_TAG" ]; then
                     RANGE="${PREV_TAG}..HEAD"
-                    HEADER="## What's Changed since ${PREV_TAG}"
+                    HEADER="## Changelog (Since ${PREV_TAG})"
                   else
                     RANGE="HEAD"
                     HEADER="## Changelog"
