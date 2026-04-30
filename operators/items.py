@@ -485,6 +485,19 @@ def _mark_colliders(objs):
             obj.data.name = tmp
 
 
+def _duplicate_objs(src_objs):
+    """Deep-copy a list of objects (object + mesh data) and link to the active collection."""
+    coll  = bpy.context.collection if bpy.context.collection else bpy.context.scene.collection
+    dupes = []
+    for obj in src_objs:
+        new_obj = obj.copy()
+        if obj.data:
+            new_obj.data = obj.data.copy()
+        coll.objects.link(new_obj)
+        dupes.append(new_obj)
+    return dupes
+
+
 _SPLIT_RE = re.compile(r'[-_\s]+')
 _COLOR_SUFFIXES  = ('_basecolor', '-basecolor', '_color', '-color', '_diffuse', '-diffuse')
 _LAYOUT_SUFFIXES = ('-uniform', '_uniform', '-offset', '_offset')
@@ -542,18 +555,40 @@ def _next_new_object_name(group):
 
 def _split_preset_paths(gi, ii_start, ii_end, paths):
     """
-    For each preset item created (ii_start..ii_end-1), build a path list that
-    contains the item's own color texture plus all non-color shared maps.
+    For each preset item created (ii_start..ii_end-1), build a path list using
+    positional pairing: each map type is assigned by index, with the last map of
+    that type repeating for any remaining items.
     Returns list of (gi, ii, filtered_paths).
     """
-    shared   = [p for p in paths if _classify_tex(os.path.basename(p)) != 'Color']
-    colors   = [p for p in paths if _classify_tex(os.path.basename(p)) == 'Color']
-    result   = []
-    n_items  = ii_end - ii_start
-    for local_idx in range(n_items):
-        color_path = colors[local_idx] if local_idx < len(colors) else (colors[-1] if colors else None)
-        item_paths = ([color_path] if color_path else []) + shared
-        result.append((gi, ii_start + local_idx, item_paths))
+    colors  = [p for p in paths if _classify_tex(os.path.basename(p)) == 'Color']
+    n_items = ii_end - ii_start
+    if not colors:
+        return [(gi, ii_start, paths)] if n_items > 0 else []
+    per_item = _build_per_item_paths(paths, colors)
+    return [(gi, ii_start + i, per_item[i]) for i in range(min(n_items, len(per_item)))]
+
+
+def _build_per_item_paths(tex_paths, color_paths):
+    """
+    Pair textures to items positionally.
+    Colors are paired 1:1 with items.
+    For each other map type, if multiple maps exist they are paired by index;
+    when a type has fewer maps than colors the last map of that type repeats.
+    Returns one path list per color.
+    """
+    from collections import defaultdict
+    type_buckets = defaultdict(list)
+    for p in tex_paths:
+        t = _classify_tex(os.path.basename(p))
+        if t != 'Color':
+            type_buckets[t].append(p)
+
+    result = []
+    for idx, color_path in enumerate(color_paths):
+        item_paths = [color_path]
+        for maps in type_buckets.values():
+            item_paths.append(maps[idx] if idx < len(maps) else maps[-1])
+        result.append(item_paths)
     return result
 
 
@@ -612,6 +647,14 @@ class OPT_OT_add_item(Operator):
     )  # type: ignore
     item_preset: EnumProperty(
         name="Mesh", items=lambda self, ctx: constants.MESH_TYPE,
+    )  # type: ignore
+    item_quantity: EnumProperty(
+        name="Quantity",
+        items=[
+            ('SINGLE',   'Single',   'All maps applied to a single item'),
+            ('MULTIPLE', 'Multiple', 'One item per color map, other maps matched by index')
+        ],
+        default='SINGLE',
     )  # type: ignore
     preview_image_name: StringProperty(name="Texture", default="")  # type: ignore
 
@@ -679,6 +722,7 @@ class OPT_OT_add_item(Operator):
                        file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
             file_input(layout, context.scene, "Collider:", "optiflow_add_col_path",
                        file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
+            prop_input(layout, self, "Quantity:", "item_quantity", expand=True)
         elif self.item_mode == "PRESET":
             prop_input(layout, self, "Mesh:", "item_preset")
         prop_input(layout, self, "Alias:", "item_alias")
@@ -745,6 +789,7 @@ class OPT_OT_add_item(Operator):
         # Blender may reset the operator state during the UNDO push.
         overrides = {
             'item_mode':           str(self.item_mode),
+            'item_quantity':       str(self.item_quantity),
             'roughness_enabled':   bool(self.tex_roughness_enabled),
             'roughness':           float(self.tex_roughness),
             'metallic_enabled':    bool(self.tex_metallic_enabled),
@@ -792,25 +837,39 @@ class OPT_OT_add_item(Operator):
 
         group, gi = helpers.ensure_default_group(scene)
 
-        name = ""
-        tex_paths = []
+        tex_paths   = []
+        color_paths = []
         if _tex_groups:
             group_keys  = list(_tex_groups.keys())
             tex_paths   = _tex_groups[group_keys[max(0, min(_tex_current_group, len(group_keys) - 1))]]
             color_paths = [p for p in tex_paths if _classify_tex(os.path.basename(p)) == 'Color']
-            for p in color_paths:
-                name = _derive_name_from_color(p, color_paths)
-                break
-        if not name:
-            name = _next_new_object_name(group)
 
-        ii = len(group.items)
-        _add_item(context, group, 'OBJECT', self.item_preset, obj_objs + col_objs, name, self.item_alias)
-        helpers.rebuild_and_select(scene, gi, ii)
-        helpers.tag_redraw_all(context)
+        if overrides.get('item_quantity') == 'MULTIPLE' and color_paths:
+            per_item = _build_per_item_paths(tex_paths, color_paths)
+            pending  = []
+            for idx, (color_path, item_paths) in enumerate(zip(color_paths, per_item)):
+                item_objs = (obj_objs + col_objs) if idx == 0 else (_duplicate_objs(obj_objs) + _duplicate_objs(col_objs))
+                name = _derive_name_from_color(color_path, color_paths) or _next_new_object_name(group)
+                ii   = len(group.items)
+                _add_item(context, group, 'OBJECT', self.item_preset, item_objs, name, self.item_alias)
+                pending.append((gi, ii, item_paths))
 
-        if tex_paths:
-            self._schedule_import(scene, gi, ii, tex_paths, overrides)
+            helpers.rebuild_and_select(scene, gi, len(group.items) - 1)
+            helpers.tag_redraw_all(context)
+            for gi_p, ii_p, item_paths in pending:
+                self._schedule_import(scene, gi_p, ii_p, item_paths, overrides)
+        else:
+            name = _derive_name_from_color(color_paths[0], color_paths) if color_paths else ""
+            if not name:
+                name = _next_new_object_name(group)
+
+            ii = len(group.items)
+            _add_item(context, group, 'OBJECT', self.item_preset, obj_objs + col_objs, name, self.item_alias)
+            helpers.rebuild_and_select(scene, gi, ii)
+            helpers.tag_redraw_all(context)
+
+            if tex_paths:
+                self._schedule_import(scene, gi, ii, tex_paths, overrides)
 
         return {'FINISHED'}
 
@@ -1165,6 +1224,29 @@ class OPT_OT_set_preset(Operator):
             bpy.data.meshes.remove(template_mesh)
 
         self.report({'INFO'}, f"Applied preset '{self.preset}' to {len(mesh_objs)} object(s).")
+        return {'FINISHED'}
+
+# endregion
+
+# region Reapply Names
+
+class OPT_OT_reapply_names(Operator):
+    """Reapply the current name of every item to all its linked objects."""
+    bl_idname   = "optiflow.reapply_names"
+    bl_label    = "Reapply Names"
+    bl_description = "Rename all linked objects for every item based on their current name and the active prefix/suffix"
+    bl_options  = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        count = 0
+        for group in scene.optiflow_groups:
+            for item in group.items:
+                # Re-assigning the name triggers _on_item_name_update, which
+                # sanitises, enforces uniqueness, and renames all linked objects.
+                item.name = item.name
+                count += 1
+        self.report({'INFO'}, f"Reapplied names for {count} item(s).")
         return {'FINISHED'}
 
 # endregion

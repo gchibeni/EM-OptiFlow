@@ -173,10 +173,7 @@ class EXPORTERS_UL_list(UIList):
         row       = layout.row(align=True)
         type_icon = EXPORTER_ICONS.get(item.exporter_type, 'EXPORT')
         row.label(text="", icon=type_icon)
-        label = item.exporter_type
-        if item.prefix:
-            label += f"  [{item.prefix}]"
-        row.label(text=label)
+        row.label(text=item.exporter_type)
         row.separator(factor=1.0)
         if is_active:
             self._draw_active_buttons(row, item, context.scene)
@@ -205,7 +202,7 @@ class EXPORTERS_UL_list(UIList):
         if self.filter_name:
             query = self.filter_name.upper()
             for exp in exporters:
-                searchable = exp.exporter_type + " " + exp.prefix
+                searchable = exp.exporter_type
                 if query in searchable.upper():
                     flt_flags.append(self.bitflag_filter_item)
                 else:

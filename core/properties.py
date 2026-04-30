@@ -12,7 +12,6 @@ from . import helpers
 
 renaming_guard = False
 pending_trailing_slot = None
-_exporter_prefix_guard = False
 
 # endregion
 
@@ -59,6 +58,10 @@ def _on_item_name_update(self, context):
         return
     clean_name = helpers.sanitize_name(self.name)
     if not clean_name:
+        if self.prev_name:
+            renaming_guard = True
+            self.name = self.prev_name
+            renaming_guard = False
         return
     scene = context.scene
     group = helpers.find_parent_group(self, scene)
@@ -68,35 +71,48 @@ def _on_item_name_update(self, context):
         renaming_guard = True
         self.name = clean_name
         renaming_guard = False
+    self.prev_name = clean_name
     objs = [ref.object for ref in self.objects if ref.object is not None]
     if not objs:
         return
-    _rename_item_objects(objs, clean_name)
+    prefix = getattr(scene, 'optiflow_item_prefix', '')
+    suffix = getattr(scene, 'optiflow_item_suffix', '')
+    _rename_item_objects(objs, clean_name, prefix, suffix)
 
 
 _INVISIBLE_PREFIXES = {"COL", "PLACER", "SNAP", "GUIDE"}
 
-def _rename_item_objects(objs, clean_name):
+def _rename_item_objects(objs, clean_name, prefix="", suffix=""):
     """Rename objects as PREFIX_name, or PREFIX_name_N when the same prefix appears more than once.
+    An optional name prefix/suffix is applied to clean_name; already-present affixes are not doubled.
     Objects whose prefix is in _INVISIBLE_PREFIXES also get the ColMat invisible material applied.
     """
     from collections import defaultdict
 
-    prefix_groups = defaultdict(list)
-    for obj in objs:
-        prefix = helpers.get_prefix(obj) or "MESH"
-        prefix_groups[prefix].append(obj)
+    # Build effective name — skip affix if it's already present to avoid duplication
+    parts = []
+    if prefix and not clean_name.startswith(f"{prefix}_"):
+        parts.append(prefix)
+    parts.append(clean_name)
+    if suffix and not clean_name.endswith(f"_{suffix}"):
+        parts.append(suffix)
+    effective_name = "_".join(parts)
 
-    for prefix, group in prefix_groups.items():
-        apply_invisible = prefix in _INVISIBLE_PREFIXES
-        base = helpers.strip_trailing_number(clean_name)
+    obj_prefix_groups = defaultdict(list)
+    for obj in objs:
+        p = helpers.get_prefix(obj) or "MESH"
+        obj_prefix_groups[p].append(obj)
+
+    for p, group in obj_prefix_groups.items():
+        apply_invisible = p in _INVISIBLE_PREFIXES
         if len(group) == 1:
-            helpers.rename_obj(group[0], f"{prefix}_{base}")
+            helpers.rename_obj(group[0], f"{p}_{effective_name}")
             if apply_invisible:
                 helpers.set_invisible_mat(group[0], "ColMat")
         else:
+            base = helpers.strip_trailing_number(effective_name)
             for i, obj in enumerate(group, start=1):
-                helpers.rename_obj(obj, f"{prefix}_{base}_{i}")
+                helpers.rename_obj(obj, f"{p}_{base}_{i}")
                 if apply_invisible:
                     helpers.set_invisible_mat(obj, "ColMat")
 
@@ -148,17 +164,6 @@ def _merge_dialog():
     return None
 
 
-def _on_exporter_prefix_update(self, context):
-    """Sanitize exporter prefix on change."""
-    global _exporter_prefix_guard
-    if _exporter_prefix_guard:
-        return
-    clean = helpers.sanitize_prefix(self.prefix)
-    if self.prefix != clean:
-        _exporter_prefix_guard = True
-        self.prefix = clean
-        _exporter_prefix_guard = False
-
 # endregion
 
 # region PropertyGroups
@@ -174,6 +179,7 @@ class ObjectRef(PropertyGroup):
 class Item(PropertyGroup):
     """Named container for objects with type and mesh variant."""
     name:      StringProperty(name="Name", update=_on_item_name_update)  # type: ignore
+    prev_name: StringProperty(options={'HIDDEN'})  # type: ignore
     alias:     StringProperty(name="Alias")  # type: ignore
     selected:  BoolProperty(default=False)  # type: ignore
     item_type: EnumProperty(name="Type", items=ITEM_TYPE)  # type: ignore
@@ -204,9 +210,6 @@ class Exporter(PropertyGroup):
         name="Exporter", items=EXPORTER_TYPE, default='GLTF',
     )  # type: ignore
     override_path: StringProperty(name="Override Path")  # type: ignore
-    prefix: StringProperty(
-        name="Prefix", update=_on_exporter_prefix_update,
-    )  # type: ignore
     scale: FloatProperty(
         name="Scale", default=1.0, min=0.0, max=1000.0,
     )  # type: ignore

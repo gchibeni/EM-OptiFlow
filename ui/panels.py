@@ -73,7 +73,7 @@ def _draw_main(layout, context):
     row.operator("optiflow.open_github", text="GitHub", icon="HOME")
     row.operator("optiflow.open_preferences", text="Settings", icon="TOOL_SETTINGS")
     update_row = row.row()
-    update_row.scale_x = 1.23
+    update_row.scale_x = 1.25
     update_row.enabled = not update.get("checking", False)
     update_row.alert = update.get("available", False)
     update_icon = 'PROP_ON' if update.get("available") else 'PREVIEW_LOADING'
@@ -98,6 +98,15 @@ def _draw_items_section(layout, scene):
     )
     items_header.label(text="Items")
     if scene.show_items:
+        split = layout.split(factor=0.23)
+        split.label(text="Prefix / Suffix:")
+        row = split.row(align=True)
+        row.prop(scene, "optiflow_item_prefix", text="")
+        row.prop(scene, "optiflow_item_suffix", text="")
+        row.separator(factor=1.23)
+        col = row.column(align=True)
+        col.scale_x = 1.25
+        col.operator("optiflow.reapply_names", text="", icon="CHECKMARK")
         row = layout.row()
         row.template_list(
             "OPT_UL_flat", "optiflow_flat",
@@ -111,6 +120,7 @@ def _draw_items_section(layout, scene):
         isolate_icon = 'HIDE_ON' if scene.get("optiflow_item_isolated", False) else 'HIDE_OFF'
         col.operator("optiflow.isolate_items", text="", icon=isolate_icon)
         col.operator("optiflow.auto_fill", text="", icon="SPREADSHEET")
+
 
 
 def _draw_exporters_section(layout, scene):
@@ -172,7 +182,7 @@ def _draw_import_progress(layout, scene):
         text=f"Importing textures... {int(factor * 100)}%",
     )
     btn = row.row()
-    btn.scale_x = 1.23
+    btn.scale_x = 1.25
     btn.operator("optiflow.cancel_import", text="", icon='X')
 
 # endregion

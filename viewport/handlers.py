@@ -1,8 +1,21 @@
 import bpy
+import re
 from bpy.app.handlers import persistent
 from bpy.types import Scene
 from bpy.props import StringProperty, BoolProperty, IntProperty, CollectionProperty, FloatProperty
 from . import screen
+
+
+def _sanitize_item_prefix(self, context):
+    clean = re.sub(r'[^A-Za-z0-9]', '', self.optiflow_item_prefix).upper()
+    if self.optiflow_item_prefix != clean:
+        self.optiflow_item_prefix = clean
+
+
+def _sanitize_item_suffix(self, context):
+    clean = re.sub(r'[^A-Za-z0-9]', '', self.optiflow_item_suffix).upper()
+    if self.optiflow_item_suffix != clean:
+        self.optiflow_item_suffix = clean
 
 # region Timers
 
@@ -218,8 +231,8 @@ def register():
     Scene.optiflow_autofill_source     = StringProperty(name="Last Source",     default='GOOGLE_SHEETS', options={'HIDDEN'})  # type: ignore
     Scene.optiflow_autofill_key_name   = StringProperty(name="Last Key Column",  default='',             options={'HIDDEN'})  # type: ignore
     Scene.optiflow_autofill_header_row = StringProperty(name="Last Header Row",  default='1',            options={'HIDDEN'})  # type: ignore
-    Scene.optiflow_autofill_prefix     = StringProperty(name="Last Prefix",      default='',             options={'HIDDEN'})  # type: ignore
-    Scene.optiflow_autofill_suffix     = StringProperty(name="Last Suffix",      default='',             options={'HIDDEN'})  # type: ignore
+    Scene.optiflow_item_prefix = StringProperty(name="Prefix", default='', options={'HIDDEN'}, update=_sanitize_item_prefix)  # type: ignore
+    Scene.optiflow_item_suffix = StringProperty(name="Suffix", default='', options={'HIDDEN'}, update=_sanitize_item_suffix)  # type: ignore
     bpy.types.WindowManager.optiflow_ctrl_held = BoolProperty(
         default=False, options={'HIDDEN', 'SKIP_SAVE'},
     )
@@ -253,7 +266,7 @@ def unregister():
         "optiflow_is_importing", "optiflow_tex_progress",
         "optiflow_autofill_url", "optiflow_autofill_file", "optiflow_autofill_tab",
         "optiflow_autofill_source", "optiflow_autofill_key_name", "optiflow_autofill_header_row",
-        "optiflow_autofill_prefix", "optiflow_autofill_suffix",
+        "optiflow_item_prefix", "optiflow_item_suffix",
     ):
         if hasattr(Scene, attr):
             delattr(Scene, attr)

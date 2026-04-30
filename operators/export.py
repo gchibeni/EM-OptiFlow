@@ -46,9 +46,10 @@ def resolve_export_path(exporter, scene):
     return os.path.join(os.path.expanduser("~"), "Documents")
 
 
-def build_item_filename(item_name, prefix, exporter):
+def build_item_filename(item_name, exporter, prefix="", suffix=""):
     """Build the export filename with extension based on exporter type."""
-    name = f"{prefix}_{item_name}" if prefix else item_name
+    parts = [p for p in [prefix, item_name, suffix] if p]
+    name = "_".join(parts)
     match exporter.exporter_type:
         case 'GLTF':
             ext = 'glb' if exporter.embed_materials else 'gltf'
@@ -181,13 +182,12 @@ def _restore_material_names(restore):
         mat.name = orig
 
 
-def export_item(item, exporter, export_dir):
+def export_item(item, exporter, export_dir, prefix="", suffix=""):
     """Export a single item as one file into export_dir."""
     objs = select_item_objects(item)
     if not objs:
         return
-    prefix   = exporter.prefix.strip()
-    filename = build_item_filename(item.name, prefix, exporter)
+    filename = build_item_filename(item.name, exporter, prefix, suffix)
     os.makedirs(export_dir, exist_ok=True)
     filepath = os.path.join(export_dir, filename)
     restore = _rename_item_materials(item)
@@ -202,18 +202,21 @@ def export_group(group, exporter, scene):
     base_path  = resolve_export_path(exporter, scene)
     group_name = group.name.strip()
     export_dir = os.path.join(base_path, group_name) if group_name else base_path
+    prefix     = getattr(scene, 'optiflow_item_prefix', '')
+    suffix     = getattr(scene, 'optiflow_item_suffix', '')
     for item in group.items:
-        export_item(item, exporter, export_dir)
+        export_item(item, exporter, export_dir, prefix, suffix)
 
 
 def collect_export_files(scene):
     """Collect all files to be exported. Returns (files, exporters_info)."""
     files          = []
     exporters_info = []
+    prefix = getattr(scene, 'optiflow_item_prefix', '')
+    suffix = getattr(scene, 'optiflow_item_suffix', '')
     for exporter in scene.exporters:
         base_path = resolve_export_path(exporter, scene)
-        prefix    = exporter.prefix.strip()
-        exporters_info.append((exporter.exporter_type, prefix, base_path))
+        exporters_info.append((exporter.exporter_type, base_path))
         for group in scene.optiflow_groups:
             group_name = group.name.strip()
             export_dir = os.path.join(base_path, group_name) if group_name else base_path
@@ -224,7 +227,7 @@ def collect_export_files(scene):
                 ]
                 if not objs:
                     continue
-                filename = build_item_filename(item.name, prefix, exporter)
+                filename = build_item_filename(item.name, exporter, prefix, suffix)
                 filepath = os.path.join(export_dir, filename)
                 files.append((filepath, os.path.isfile(filepath)))
     return files, exporters_info
@@ -277,13 +280,10 @@ class OPT_OT_export_confirm(Operator):
         total    = len(self._files)
         replaced = len(self._overwrite)
         layout.label(text=f"{total} file(s) will be exported to:", icon='INFO')
-        for exp_type, prefix, path in self._exporters_info:
-            tag = f"[{exp_type}]"
-            if prefix:
-                tag += f" [{prefix}]"
+        for exp_type, path in self._exporters_info:
             split = layout.split(factor=0.20)
             box = split.box()
-            box.label(text=tag)
+            box.label(text=f"[{exp_type}]")
             box = split.box()
             box.label(text=path)
         if replaced > 0:

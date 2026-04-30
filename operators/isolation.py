@@ -3,12 +3,7 @@ import bmesh
 from bpy.types import Operator
 from ..viewport import screen
 
-# region Variables
-
-_item_isolate_timer_running   = False
-_isolation_mode_timer_running = False
-
-# endregion
+# endregion (no module-level timer flags — use bpy.app.timers.is_registered instead)
 
 # region Isolate
 
@@ -154,51 +149,40 @@ def disable_item_isolation(context, scene):
 
 def ensure_isolation_mode_timer():
     """Start the edit-mode watch timer if not already running."""
-    global _isolation_mode_timer_running
-    if not _isolation_mode_timer_running:
-        _isolation_mode_timer_running = True
+    if not bpy.app.timers.is_registered(_isolation_mode_poll):
         bpy.app.timers.register(_isolation_mode_poll, first_interval=0.1)
 
 
 def _isolation_mode_poll():
     """Auto-reveal if the user leaves edit mode while isolated."""
-    global _isolation_mode_timer_running
     try:
         context = bpy.context
         scene   = context.scene
     except Exception:
-        _isolation_mode_timer_running = False
         return None
     if not scene.get("optiflow_isolated", False):
-        _isolation_mode_timer_running = False
         return None
     if scene.get("optiflow_isolated_mode", "") == 'EDIT_MESH' and context.mode != 'EDIT_MESH':
         optiflow_reveal.reveal(optiflow_reveal, context, scene)
         for area in context.window.screen.areas:
             area.tag_redraw()
-        _isolation_mode_timer_running = False
         return None
     return 0.1
 
 
 def ensure_item_isolate_timer():
     """Start the polling timer if not already running."""
-    global _item_isolate_timer_running
-    if not _item_isolate_timer_running:
-        _item_isolate_timer_running = True
+    if not bpy.app.timers.is_registered(_item_isolate_poll):
         bpy.app.timers.register(_item_isolate_poll, first_interval=0.1)
 
 
 def _item_isolate_poll():
-    """Re apply item isolation when the selected item changes."""
-    global _item_isolate_timer_running
+    """Re-apply item isolation when the selected item changes."""
     try:
         scene = bpy.context.scene
     except Exception:
-        _item_isolate_timer_running = False
         return None
     if not scene.get("optiflow_item_isolated", False):
-        _item_isolate_timer_running = False
         return None
     last_idx    = scene.get("optiflow_item_isolated_last_idx", -1)
     current_idx = scene.optiflow_flat_index

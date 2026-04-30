@@ -647,9 +647,6 @@ class optiflow_auto_fill(Operator):
 
     key_name:   StringProperty(name="Key",        description="Column name in the sheet to use as the result (e.g. 'SKU')")  # type: ignore
     header_row: IntProperty(name="Row", default=1, min=1, description="Row number that contains the column headers")  # type: ignore
-    prefix:     StringProperty(name="Prefix",   description="Optional prefix added before the key value (PREFIX_VALUE)")  # type: ignore
-    suffix:     StringProperty(name="Suffix",   description="Optional suffix added after the key value (VALUE_SUFFIX)")   # type: ignore
-
     sheet_tab: EnumProperty(
         name="Sheet",
         items=_sheet_tab_items,
@@ -714,20 +711,14 @@ class optiflow_auto_fill(Operator):
         row = split.row(align=True)
         row.prop(self, "key_name", text="")
         row.prop(self, "header_row")
-        row = layout.row(align=True)
-        split = layout.split(factor=0.23)
-        split.label(text="Prefix / Suffix:")
-        row = split.row(align=True)
-        row.prop(self, "prefix", text="")
-        row.prop(self, "suffix", text="")
         layout.separator(type='LINE')
 
     def execute(self, context):
         scene   = context.scene
         self._save_settings(scene)
         key_col = self.key_name.strip()
-        prefix  = re.sub(r'[^A-Za-z0-9]', '', self.prefix)
-        suffix  = re.sub(r'[^A-Za-z0-9]', '', self.suffix)
+        prefix  = getattr(context.scene, 'optiflow_item_prefix', '')
+        suffix  = getattr(context.scene, 'optiflow_item_suffix', '')
 
         if not key_col:
             self.report({'ERROR'}, "Enter the key column name (e.g. 'SKU').")
@@ -818,8 +809,6 @@ class optiflow_auto_fill(Operator):
         if scene.optiflow_autofill_source in ('GOOGLE_SHEETS', 'FILE', 'TEXT_EDITOR'):
             self.source = scene.optiflow_autofill_source
         self.key_name = scene.optiflow_autofill_key_name
-        self.prefix   = scene.optiflow_autofill_prefix
-        self.suffix   = scene.optiflow_autofill_suffix
         try:
             self.header_row = int(scene.optiflow_autofill_header_row)
         except ValueError:
@@ -835,7 +824,5 @@ class optiflow_auto_fill(Operator):
         scene.optiflow_autofill_source     = self.source
         scene.optiflow_autofill_key_name   = self.key_name
         scene.optiflow_autofill_header_row = str(self.header_row)
-        scene.optiflow_autofill_prefix     = self.prefix
-        scene.optiflow_autofill_suffix     = self.suffix
 
 # endregion
