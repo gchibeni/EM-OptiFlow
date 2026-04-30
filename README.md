@@ -1,12 +1,8 @@
-# OptiFlow
+## ![OptiFlow](images/optiflow-featured.png)
 
-A Blender addon that automates repetitive tasks across the 3D production pipeline — handling asset imports, PBR texture processing, mesh presets, naming standardization, SKU management, and batch exports. Designed to produce highly optimized assets by compressing and resizing textures with minimal perceptual quality loss, keeping file sizes as small as possible without compromising visual fidelity. By enforcing consistent naming conventions and automating error-prone manual steps, it also reduces human error and makes production reviews faster and more reliable.
+A Blender addon that automates repetitive tasks across the 3D production pipeline — handling asset imports, PBR texture processing, mesh presets, naming standardization, ID management, and batch exports. Designed to produce highly optimized assets by compressing and resizing textures with minimal perceptual quality loss, keeping file sizes as small as possible without compromising visual fidelity. By enforcing consistent naming conventions and automating error-prone manual steps, it also reduces human error and makes production reviews faster and more reliable.
 
-**Requires Blender 5.0+**
-
-The panel lives in the **3D Viewport sidebar → OptiFlow tab**.
-
----
+**Requires Blender 5.0+** / **3D Viewport sidebar → OptiFlow tab**.
 
 ## Features
 
