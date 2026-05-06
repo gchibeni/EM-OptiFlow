@@ -96,7 +96,8 @@ def _draw_items_section(layout, scene):
         icon='DOWNARROW_HLT' if scene.show_items else 'RIGHTARROW',
         icon_only=True, emboss=False,
     )
-    items_header.label(text="Items")
+    item_count = sum(len(g.items) for g in scene.optiflow_groups)
+    items_header.label(text=f"Items ({item_count})" if item_count else "Items")
     if scene.show_items:
         split = layout.split(factor=0.23)
         split.label(text="Prefix / Suffix:")

@@ -12,6 +12,7 @@ from ..ui.file_dialogs import dir_input, prop_input
 def _copy_exporter_props(src, dst):
     """Copy all properties from one exporter to another."""
     dst.exporter_type    = src.exporter_type
+    dst.export_subfolder = src.export_subfolder
     dst.override_path    = src.override_path
     dst.scale            = src.scale
     dst.apply_transforms = src.apply_transforms
@@ -105,8 +106,9 @@ class EXPORTERS_OT_edit(Operator):
     bl_description = "Edit exporter settings"
     bl_options = {'UNDO', 'INTERNAL'}
 
-    edit_exporter_type:   EnumProperty(name="Exporter", items=constants.EXPORTER_TYPE)  # type: ignore
-    edit_embed_materials: BoolProperty(name="Embed Materials", default=True)  # type: ignore
+    edit_exporter_type:    EnumProperty(name="Exporter", items=constants.EXPORTER_TYPE)  # type: ignore
+    edit_export_subfolder: EnumProperty(name="Subfolder", items=constants.SUBFOLDER_TYPE, default='GROUP')  # type: ignore
+    edit_embed_materials:  BoolProperty(name="Embed Materials", default=True)  # type: ignore
     edit_animations:      BoolProperty(name="Animations", default=True)  # type: ignore
     edit_tangents:          BoolProperty(name="Tangents", default=True)  # type: ignore
     edit_images_type:       EnumProperty(name="Images Type", items=constants.GLTF_IMAGE_TYPE, default='AUTO')  # type: ignore
@@ -119,7 +121,8 @@ class EXPORTERS_OT_edit(Operator):
         if not scene.exporters or scene.exporters_index < 0:
             return {'CANCELLED'}
         src = scene.exporters[scene.exporters_index]
-        self.edit_exporter_type   = src.exporter_type
+        self.edit_exporter_type    = src.exporter_type
+        self.edit_export_subfolder = src.export_subfolder
         context.scene.optiflow_edit_override_path = src.override_path
         self.edit_embed_materials = src.embed_materials
         self.edit_animations      = src.animations
@@ -134,6 +137,8 @@ class EXPORTERS_OT_edit(Operator):
         layout = self.layout
         prop_input(layout, self, "Exporter:", "edit_exporter_type")
         dir_input(layout, context.scene, "Override Path:", "optiflow_edit_override_path")
+        layout.separator(type='LINE')
+        prop_input(layout, self, "Subfolder:", "edit_export_subfolder", expand=True)
         layout.separator(type='LINE')
         split = layout.split(factor=0.23)
         split.label(text="Data:")
@@ -160,8 +165,9 @@ class EXPORTERS_OT_edit(Operator):
     def execute(self, context):
         scene    = context.scene
         exporter = scene.exporters[scene.exporters_index]
-        exporter.exporter_type   = self.edit_exporter_type
-        exporter.override_path   = context.scene.optiflow_edit_override_path
+        exporter.exporter_type    = self.edit_exporter_type
+        exporter.export_subfolder = self.edit_export_subfolder
+        exporter.override_path    = context.scene.optiflow_edit_override_path
         exporter.embed_materials = self.edit_embed_materials
         exporter.animations      = self.edit_animations
         exporter.tangents          = self.edit_tangents

@@ -498,6 +498,37 @@ def _duplicate_objs(src_objs):
     return dupes
 
 
+_COLLIDER_NAME_RE = re.compile(r'collider|collision', re.I)
+
+
+def _is_collider_mesh(obj):
+    """Return True if obj is a collider that should be excluded from a mesh join."""
+    return helpers.get_prefix(obj) == 'COL' or bool(_COLLIDER_NAME_RE.search(obj.name))
+
+
+def _merge_meshes(obj_objs):
+    """Join all non-collider meshes into one; remove non-mesh objects."""
+    colliders = [o for o in obj_objs if o.type == 'MESH' and _is_collider_mesh(o)]
+    meshes    = [o for o in obj_objs if o.type == 'MESH' and not _is_collider_mesh(o)]
+
+    for o in obj_objs:
+        if o.type != 'MESH':
+            bpy.data.objects.remove(o, do_unlink=True)
+
+    if len(meshes) <= 1:
+        return meshes + colliders
+
+    target = meshes[0]
+    with bpy.context.temp_override(
+        active_object=target,
+        selected_objects=meshes,
+        selected_editable_objects=meshes,
+    ):
+        bpy.ops.object.join()
+
+    return [target] + colliders
+
+
 _SPLIT_RE = re.compile(r'[-_\s]+')
 _COLOR_SUFFIXES  = ('_basecolor', '-basecolor', '_color', '-color', '_diffuse', '-diffuse')
 _LAYOUT_SUFFIXES = ('-uniform', '_uniform', '-offset', '_offset')
@@ -592,12 +623,13 @@ def _build_per_item_paths(tex_paths, color_paths):
     return result
 
 
-def _add_item(context, group, item_type, preset, objs, name, alias=""):
+def _add_item(context, group, item_type, preset, objs, name, alias="", batch=""):
     """Create one item in group, link objects (or apply preset mesh), then set name."""
     it           = group.items.add()
     it.item_type = item_type
     it.preset    = preset
     it.alias     = alias
+    it.batch     = batch
     if item_type == 'PRESET':
         it.name = name             # sanitise + uniqueness; no objects yet → rename is no-op
         _apply_preset(context, it, preset)
@@ -640,6 +672,7 @@ class OPT_OT_add_item(Operator):
     bl_options = {'INTERNAL', 'UNDO'}
 
     item_alias: StringProperty(name="Alias", description="Descriptive for identification only", default="")  # type: ignore
+    item_batch: StringProperty(name="Batch", description="Batch label for identification only", default="")  # type: ignore
     item_mode: EnumProperty(
         name="Mode",
         items=constants.ITEM_TYPE,
@@ -655,6 +688,14 @@ class OPT_OT_add_item(Operator):
             ('MULTIPLE', 'Multiple', 'One item per color map, other maps matched by index')
         ],
         default='SINGLE',
+    )  # type: ignore
+    item_merge: EnumProperty(
+        name="Merge",
+        items=[
+            ('OFF', 'Off', 'Import the object as-is'),
+            ('ON',  'On',  'Join all meshes into one, excluding colliders'),
+        ],
+        default='OFF',
     )  # type: ignore
     preview_image_name: StringProperty(name="Texture", default="")  # type: ignore
 
@@ -699,6 +740,8 @@ class OPT_OT_add_item(Operator):
         context.scene.optiflow_add_obj_path = ""
         context.scene.optiflow_add_col_path = ""
         self.item_alias             = ""
+        self.item_batch             = ""
+        self.item_merge             = 'OFF'
         self.item_preset            = constants.MESH_TYPE[0][0] if constants.MESH_TYPE else 'TILE'
         self.tex_roughness_enabled  = False
         self.tex_roughness          = 50.0
@@ -723,9 +766,10 @@ class OPT_OT_add_item(Operator):
             file_input(layout, context.scene, "Collider:", "optiflow_add_col_path",
                        file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
             prop_input(layout, self, "Quantity:", "item_quantity", expand=True)
+            prop_input(layout, self, "Merge:", "item_merge", expand=True)
         elif self.item_mode == "PRESET":
             prop_input(layout, self, "Mesh:", "item_preset")
-        prop_input(layout, self, "Alias:", "item_alias")
+        prop_input(layout, self, "Batch:", "item_batch")
         layout.separator(type='LINE')
         row = layout.row(align=True)
         row.operator("optiflow.select_textures", text="Add Texture(s)")
@@ -790,6 +834,7 @@ class OPT_OT_add_item(Operator):
         overrides = {
             'item_mode':           str(self.item_mode),
             'item_quantity':       str(self.item_quantity),
+            'item_merge':          str(self.item_merge),
             'roughness_enabled':   bool(self.tex_roughness_enabled),
             'roughness':           float(self.tex_roughness),
             'metallic_enabled':    bool(self.tex_metallic_enabled),
@@ -821,6 +866,12 @@ class OPT_OT_add_item(Operator):
         _strip_materials(obj_objs)
         _push_actions_to_nla(obj_objs)
 
+        if overrides.get('item_merge') == 'ON':
+            obj_objs = _merge_meshes(obj_objs)
+            if not obj_objs:
+                self.report({'ERROR'}, "No mesh objects remain after merge")
+                return {'CANCELLED'}
+
         col_objs = []
         if scene.optiflow_add_col_path:
             col_path = bpy.path.abspath(scene.optiflow_add_col_path)
@@ -849,9 +900,10 @@ class OPT_OT_add_item(Operator):
             pending  = []
             for idx, (color_path, item_paths) in enumerate(zip(color_paths, per_item)):
                 item_objs = (obj_objs + col_objs) if idx == 0 else (_duplicate_objs(obj_objs) + _duplicate_objs(col_objs))
-                name = _derive_name_from_color(color_path, color_paths) or _next_new_object_name(group)
+                derived = _derive_name_from_color(color_path, color_paths)
+                name = derived or _next_new_object_name(group)
                 ii   = len(group.items)
-                _add_item(context, group, 'OBJECT', self.item_preset, item_objs, name, self.item_alias)
+                _add_item(context, group, 'OBJECT', self.item_preset, item_objs, name, alias=derived or "", batch=self.item_batch)
                 pending.append((gi, ii, item_paths))
 
             helpers.rebuild_and_select(scene, gi, len(group.items) - 1)
@@ -859,12 +911,11 @@ class OPT_OT_add_item(Operator):
             for gi_p, ii_p, item_paths in pending:
                 self._schedule_import(scene, gi_p, ii_p, item_paths, overrides)
         else:
-            name = _derive_name_from_color(color_paths[0], color_paths) if color_paths else ""
-            if not name:
-                name = _next_new_object_name(group)
+            derived = _derive_name_from_color(color_paths[0], color_paths) if color_paths else ""
+            name = derived or _next_new_object_name(group)
 
             ii = len(group.items)
-            _add_item(context, group, 'OBJECT', self.item_preset, obj_objs + col_objs, name, self.item_alias)
+            _add_item(context, group, 'OBJECT', self.item_preset, obj_objs + col_objs, name, alias=derived or "", batch=self.item_batch)
             helpers.rebuild_and_select(scene, gi, ii)
             helpers.tag_redraw_all(context)
 
@@ -934,11 +985,12 @@ class OPT_OT_add_item(Operator):
     def _make_preset_items(self, context, group, paths):
         colors = [p for p in paths if _classify_tex(os.path.basename(p)) == 'Color']
         if not colors:
-            _add_item(context, group, 'PRESET', self.item_preset, [], _next_new_object_name(group), self.item_alias)
+            _add_item(context, group, 'PRESET', self.item_preset, [], _next_new_object_name(group), batch=self.item_batch)
             return
         for color_path in colors:
-            name = _derive_name_from_color(color_path, colors) or _next_new_object_name(group)
-            _add_item(context, group, 'PRESET', self.item_preset, [], name, self.item_alias)
+            derived = _derive_name_from_color(color_path, colors)
+            name = derived or _next_new_object_name(group)
+            _add_item(context, group, 'PRESET', self.item_preset, [], name, alias=derived or "", batch=self.item_batch)
 
 # endregion
 
@@ -952,6 +1004,7 @@ class OPT_OT_edit_item(Operator):
     bl_options = {'UNDO', 'INTERNAL'}
 
     edit_name:      StringProperty(name="Name")       # type: ignore
+    edit_batch:     StringProperty(name="Batch")       # type: ignore
     edit_alias:     StringProperty(name="Alias")       # type: ignore
     edit_item_type: EnumProperty(
         name="Type", items=constants.ITEM_TYPE,
@@ -967,6 +1020,7 @@ class OPT_OT_edit_item(Operator):
         item = context.scene.optiflow_groups[fe.group_index].items[fe.item_index]
         # Snapshot current values into the buffer
         self.edit_name      = item.name
+        self.edit_batch     = item.batch
         self.edit_alias     = item.alias
         self.edit_item_type = item.item_type
         self.edit_preset = item.preset
@@ -980,6 +1034,7 @@ class OPT_OT_edit_item(Operator):
         item = context.scene.optiflow_groups[fe.group_index].items[fe.item_index]
         layout = self.layout
         prop_input(layout, self, "Name:", "edit_name")
+        prop_input(layout, self, "Batch:", "edit_batch")
         prop_input(layout, self, "Alias:", "edit_alias")
         prop_input(layout, self, "Type:", "edit_item_type")
         if self.edit_item_type == 'PRESET':
@@ -1006,6 +1061,7 @@ class OPT_OT_edit_item(Operator):
         item.item_type = self.edit_item_type
         item.preset = self.edit_preset
         item.name      = self.edit_name
+        item.batch     = self.edit_batch
         item.alias     = self.edit_alias
         if self.edit_item_type == 'PRESET':
             _apply_preset(context, item, self.edit_preset)

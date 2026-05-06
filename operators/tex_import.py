@@ -62,26 +62,28 @@ class _TexJob:
     """Represents one item's full texture import task."""
     __slots__ = (
         'gi', 'ii', 'mesh_obj_names', 'overrides', 'temp_dir',
-        'tex_by_type',    # dict[str, list[str]]  tex_type → [src_path, ...]
-        'bpy_remaining',  # int — Blender tasks left before material can be built
-        'bpy_images',     # dict[str, list[bpy.types.Image]]
-        'first_error',    # str | None
-        'deferred',       # bool — skip auto material build; caller calls apply_deferred_job()
-        'cancelled',      # bool — abort remaining work, skip material build
+        'tex_by_type',       # dict[str, list[str]]  tex_type → [src_path, ...]
+        'bpy_remaining',     # int — Blender tasks left before material can be built
+        'bpy_images',        # dict[str, list[bpy.types.Image]]
+        'first_error',       # str | None
+        'deferred',          # bool — skip auto material build; caller calls apply_deferred_job()
+        'cancelled',         # bool — abort remaining work, skip material build
+        'invert_roughness',  # bool — True when Reflection was remapped to Roughness for ORM packing
     )
 
-    def __init__(self, gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type, deferred=False):
-        self.gi             = gi
-        self.ii             = ii
-        self.mesh_obj_names = mesh_obj_names
-        self.overrides      = overrides
-        self.temp_dir       = temp_dir
-        self.tex_by_type    = tex_by_type
-        self.bpy_remaining  = sum(len(v) for v in tex_by_type.values())
-        self.bpy_images     = {}
-        self.first_error    = None
-        self.deferred       = deferred
-        self.cancelled      = False
+    def __init__(self, gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type, deferred=False, invert_roughness=False):
+        self.gi               = gi
+        self.ii               = ii
+        self.mesh_obj_names   = mesh_obj_names
+        self.overrides        = overrides
+        self.temp_dir         = temp_dir
+        self.tex_by_type      = tex_by_type
+        self.bpy_remaining    = sum(len(v) for v in tex_by_type.values())
+        self.bpy_images       = {}
+        self.first_error      = None
+        self.deferred         = deferred
+        self.cancelled        = False
+        self.invert_roughness = invert_roughness
 
 
 class _BpyTask:
@@ -119,6 +121,14 @@ def _setup_job(gi, ii, mesh_obj_names, src_paths, overrides, scene, deferred=Fal
     if 'Roughness' in tex_by_type and 'Reflection' in tex_by_type:
         tex_by_type.pop('Reflection')
 
+    # Reflection is the inverse of Roughness. When it arrives without a dedicated
+    # Roughness map, remap it so it participates in ORM channel packing (G channel).
+    # The invert_roughness flag tells _process_job to flip the channel before packing.
+    invert_roughness = False
+    if 'Reflection' in tex_by_type:
+        tex_by_type['Roughness'] = tex_by_type.pop('Reflection')
+        invert_roughness = True
+
     if not tex_by_type:
         return None
 
@@ -132,7 +142,8 @@ def _setup_job(gi, ii, mesh_obj_names, src_paths, overrides, scene, deferred=Fal
         tex_count -= len(tex_by_type['Opacity'])
 
     temp_dir = tempfile.mkdtemp(prefix='optiflow_tex_')
-    job      = _TexJob(gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type, deferred=deferred)
+    job      = _TexJob(gi, ii, mesh_obj_names, overrides, temp_dir, tex_by_type, deferred=deferred,
+                       invert_roughness=invert_roughness)
     if has_orm_components or has_opacity_merge:
         job.bpy_remaining = tex_count
 
@@ -308,6 +319,8 @@ def _process_job(job):
 
                     def _prep_channel(tex_type, src_path):
                         img = get_image(src_path)
+                        if tex_type == 'Roughness' and job.invert_roughness:
+                            img = invert_image(img)
                         if tex_type in ('Roughness',) and ov.get('roughness_enabled'):
                             img = adjust_reflectivity(img, ov['roughness'] / 100.0)
                         elif tex_type == 'Metallic' and ov.get('metallic_enabled'):

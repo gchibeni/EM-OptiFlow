@@ -207,6 +207,7 @@ def clone_item_props(src, dst):
     dst.item_type = src.item_type
     dst.preset = src.preset
     dst.alias     = src.alias
+    dst.batch     = src.batch
     dst.selected  = src.selected
 
 

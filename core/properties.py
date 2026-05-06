@@ -5,7 +5,7 @@ from bpy.props import (
     PointerProperty, IntProperty, FloatProperty, BoolProperty,
 )
 
-from .constants import FLAT_TYPE, ITEM_TYPE, MESH_TYPE, EXPORTER_TYPE, GLTF_IMAGE_TYPE
+from .constants import FLAT_TYPE, ITEM_TYPE, MESH_TYPE, EXPORTER_TYPE, GLTF_IMAGE_TYPE, SUBFOLDER_TYPE
 from . import helpers
 
 # region Guards
@@ -56,8 +56,8 @@ def _on_item_name_update(self, context):
     global renaming_guard
     if renaming_guard:
         return
-    clean_name = helpers.sanitize_name(self.name)
-    if not clean_name:
+    desired_name = helpers.sanitize_name(self.name)
+    if not desired_name:
         if self.prev_name:
             renaming_guard = True
             self.name = self.prev_name
@@ -65,8 +65,7 @@ def _on_item_name_update(self, context):
         return
     scene = context.scene
     group = helpers.find_parent_group(self, scene)
-    if group:
-        clean_name = helpers.unique_item_name(clean_name, group, self)
+    clean_name = helpers.unique_item_name(desired_name, group, self) if group else desired_name
     if self.name != clean_name:
         renaming_guard = True
         self.name = clean_name
@@ -77,26 +76,36 @@ def _on_item_name_update(self, context):
         return
     prefix = getattr(scene, 'optiflow_item_prefix', '')
     suffix = getattr(scene, 'optiflow_item_suffix', '')
-    _rename_item_objects(objs, clean_name, prefix, suffix)
+    _rename_item_objects(objs, clean_name, desired_name, prefix, suffix)
 
 
 _INVISIBLE_PREFIXES = {"COL", "PLACER", "SNAP", "GUIDE"}
 
-def _rename_item_objects(objs, clean_name, prefix="", suffix=""):
+def _rename_item_objects(objs, clean_name, desired_name, prefix="", suffix=""):
     """Rename objects as PREFIX_name, or PREFIX_name_N when the same prefix appears more than once.
-    An optional name prefix/suffix is applied to clean_name; already-present affixes are not doubled.
+    clean_name is the actual item name (may include a uniqueness suffix like _2).
+    desired_name is what the user intended before uniquification — used as the multi-object base
+    so that a uniqueness suffix is never confused with part of the real name.
+    An optional name prefix/suffix is applied; already-present affixes are not doubled.
     Objects whose prefix is in _INVISIBLE_PREFIXES also get the ColMat invisible material applied.
     """
     from collections import defaultdict
 
-    # Build effective name — skip affix if it's already present to avoid duplication
-    parts = []
-    if prefix and not clean_name.startswith(f"{prefix}_"):
-        parts.append(prefix)
-    parts.append(clean_name)
-    if suffix and not clean_name.endswith(f"_{suffix}"):
-        parts.append(suffix)
-    effective_name = "_".join(parts)
+    def _build_effective(name):
+        parts = []
+        if prefix and not name.startswith(f"{prefix}_"):
+            parts.append(prefix)
+        parts.append(name)
+        if suffix and not name.endswith(f"_{suffix}"):
+            parts.append(suffix)
+        return "_".join(parts)
+
+    # Single-object: use the full item name (includes any uniqueness suffix)
+    effective_name = _build_effective(clean_name)
+    # Multi-object base: use the user's intended name so we never mistake a uniqueness
+    # suffix (_2 on "TABLE_2") for part of the real name, and explicit names like "123_1"
+    # are preserved as-is.
+    multi_base = _build_effective(desired_name)
 
     obj_prefix_groups = defaultdict(list)
     for obj in objs:
@@ -110,9 +119,8 @@ def _rename_item_objects(objs, clean_name, prefix="", suffix=""):
             if apply_invisible:
                 helpers.set_invisible_mat(group[0], "ColMat")
         else:
-            base = helpers.strip_trailing_number(effective_name)
             for i, obj in enumerate(group, start=1):
-                helpers.rename_obj(obj, f"{p}_{base}_{i}")
+                helpers.rename_obj(obj, f"{p}_{multi_base}_{i}")
                 if apply_invisible:
                     helpers.set_invisible_mat(obj, "ColMat")
 
@@ -181,6 +189,7 @@ class Item(PropertyGroup):
     name:      StringProperty(name="Name", update=_on_item_name_update)  # type: ignore
     prev_name: StringProperty(options={'HIDDEN'})  # type: ignore
     alias:     StringProperty(name="Alias")  # type: ignore
+    batch:     StringProperty(name="Batch")  # type: ignore
     selected:  BoolProperty(default=False)  # type: ignore
     item_type: EnumProperty(name="Type", items=ITEM_TYPE)  # type: ignore
     preset: EnumProperty(name="Mesh", items=lambda self, ctx: MESH_TYPE)  # type: ignore
@@ -208,6 +217,9 @@ class Exporter(PropertyGroup):
     """Export configuration for a single format target."""
     exporter_type: EnumProperty(
         name="Exporter", items=EXPORTER_TYPE, default='GLTF',
+    )  # type: ignore
+    export_subfolder: EnumProperty(
+        name="Subfolder", items=SUBFOLDER_TYPE, default='GROUP',
     )  # type: ignore
     override_path: StringProperty(name="Override Path")  # type: ignore
     scale: FloatProperty(

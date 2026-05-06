@@ -43,6 +43,11 @@ EXPORTER_TYPE = [
     ('OBJ', "OBJ", ""),
 ]
 
+SUBFOLDER_TYPE = [
+    ('GROUP', "Group", ""),
+    ('NONE',  "None",  ""),
+]
+
 GLTF_IMAGE_TYPE = [
     ('AUTO', "Automatic", ""),
     ('JPEG', "Jpeg",      ""),

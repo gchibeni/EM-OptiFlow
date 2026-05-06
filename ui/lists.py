@@ -78,11 +78,24 @@ class OPT_UL_flat(UIList):
         row.separator(factor=3.0)
         icon_name = flat_entry.bl_rna.properties['entry_type'].enum_items[flat_entry.entry_type].description
         row.label(text="", icon=icon_name or 'OBJECT_DATA')
-        row.prop(item_obj, "name", text="", emboss=False, placeholder="\u2014\u2014")
+        has_alias = (item_obj.alias
+                     and item_obj.alias.lower() != item_obj.name.lower())
+        if has_alias:
+            split = row.split(factor=0.65)
+            split.prop(item_obj, "name", text="", emboss=False, placeholder="\u2014\u2014")
+            sub = split.row(align=True)
+            sub.alignment = 'RIGHT'
+            sub.enabled = False
+            alias = item_obj.alias
+            alias = alias[:12] + "..." if len(alias) > 12 else alias
+            sub.label(text=f"[{alias}]")
+        else:
+            row.prop(item_obj, "name", text="", emboss=False, placeholder="\u2014\u2014")
 
     def _draw_active_buttons(self, row, is_active, is_group):
         """Draw edit, duplicate, delete, and drag buttons for the active row."""
         if is_active:
+            row.separator(factor=2)
             if not is_group:
                 row.operator("optiflow.edit_item", text="", icon='MODIFIER_ON', emboss=False)
             row.operator("optiflow.duplicate", text="", icon='DUPLICATE', emboss=False)
@@ -90,7 +103,7 @@ class OPT_UL_flat(UIList):
             row.separator(factor=2.8)
             row.operator("optiflow.item_drag", text="", icon='GRIP', emboss=False)
         else:
-            row.label(text="", icon='BLANK1')
+            pass
 
     def filter_items(self, context, data, propname):
         """Filter entries by name, auto expanding groups while active."""

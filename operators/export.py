@@ -199,9 +199,10 @@ def export_item(item, exporter, export_dir, prefix="", suffix=""):
 
 def export_group(group, exporter, scene):
     """Export all items in a group to a subfolder."""
-    base_path  = resolve_export_path(exporter, scene)
-    group_name = group.name.strip()
-    export_dir = os.path.join(base_path, group_name) if group_name else base_path
+    base_path     = resolve_export_path(exporter, scene)
+    group_name    = group.name.strip()
+    use_subfolder = getattr(exporter, 'export_subfolder', 'GROUP') == 'GROUP'
+    export_dir = os.path.join(base_path, group_name) if (group_name and use_subfolder) else base_path
     prefix     = getattr(scene, 'optiflow_item_prefix', '')
     suffix     = getattr(scene, 'optiflow_item_suffix', '')
     for item in group.items:
@@ -215,11 +216,12 @@ def collect_export_files(scene):
     prefix = getattr(scene, 'optiflow_item_prefix', '')
     suffix = getattr(scene, 'optiflow_item_suffix', '')
     for exporter in scene.exporters:
-        base_path = resolve_export_path(exporter, scene)
+        base_path     = resolve_export_path(exporter, scene)
+        use_subfolder = getattr(exporter, 'export_subfolder', 'GROUP') == 'GROUP'
         exporters_info.append((exporter.exporter_type, base_path))
         for group in scene.optiflow_groups:
             group_name = group.name.strip()
-            export_dir = os.path.join(base_path, group_name) if group_name else base_path
+            export_dir = os.path.join(base_path, group_name) if (group_name and use_subfolder) else base_path
             for item in group.items:
                 objs = [
                     ref.object for ref in item.objects
