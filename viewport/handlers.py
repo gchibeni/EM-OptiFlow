@@ -214,6 +214,7 @@ def register():
     Scene.optiflow_tex_display_index = IntProperty(name="", default=0, options={'HIDDEN', 'SKIP_SAVE'}, update=_on_tex_index_changed)  # type: ignore
     Scene.optiflow_add_obj_path      = StringProperty(name="Object",        default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_add_col_path      = StringProperty(name="Collider",      default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
+    Scene.optiflow_change_obj_path   = StringProperty(name="Object",        default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_edit_override_path = StringProperty(name="Override Path", default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_extract_tex_dir   = StringProperty(name="Output Folder",  default="", options={'HIDDEN', 'SKIP_SAVE'})  # type: ignore
     Scene.optiflow_groups       = CollectionProperty(name="", type=Group, options={'HIDDEN'})
@@ -265,7 +266,7 @@ def unregister():
         "show_items", "optiflow_groups", "optiflow_flat_entries", "optiflow_flat_index",
         "export_path", "copyright_text", "exporters", "exporters_index", "show_exporters",
         "optiflow_origin_wip", "optiflow_tex_display", "optiflow_tex_display_index",
-        "optiflow_add_obj_path", "optiflow_add_col_path",
+        "optiflow_add_obj_path", "optiflow_add_col_path", "optiflow_change_obj_path",
         "optiflow_edit_override_path", "optiflow_extract_tex_dir",
         "optiflow_is_importing", "optiflow_tex_progress",
         "optiflow_autofill_url", "optiflow_autofill_file", "optiflow_autofill_tab",

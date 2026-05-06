@@ -1208,32 +1208,174 @@ class OPT_OT_delete(Operator):
 
 # endregion
 
-# region Set Preset
+# region Change Models
 
 class OPT_OT_set_preset(Operator):
-    """Apply a mesh preset to all selected items, keeping their original materials."""
+    """Replace the mesh of selected objects with a preset or an imported model."""
     bl_idname   = "optiflow.set_preset"
-    bl_label    = "Set as Preset"
-    bl_description = "Change the mesh preset of all selected items"
+    bl_label    = "Change Models"
+    bl_description = "Replace the mesh of all selected objects with a preset or an imported model"
     bl_options  = {'REGISTER', 'UNDO'}
 
+    item_mode: EnumProperty(
+        name="Mode",
+        items=constants.ITEM_TYPE,
+        default='OBJECT',
+    )  # type: ignore
     preset: EnumProperty(
         name="Mesh",
         items=lambda self, ctx: constants.MESH_TYPE,
     )  # type: ignore
+    item_merge: EnumProperty(
+        name="Merge",
+        items=[
+            ('OFF', 'Off', 'Replace with the primary mesh; other meshes are kept as separate objects'),
+            ('ON',  'On',  'Join all meshes into one before replacing'),
+        ],
+        default='OFF',
+    )  # type: ignore
+
+    tex_roughness_enabled: BoolProperty(name="Toggle Roughness", description="Replaces roughness — multiplies values if a map is provided (using a mask if available)", default=False)  # type: ignore
+    tex_roughness: FloatProperty(name="Roughness", subtype='PERCENTAGE', min=0.0, max=100.0, default=50.0)  # type: ignore
+    tex_metallic_enabled: BoolProperty(name="Toggle Metallic", description="Replaces metallic — multiplies values if a map is provided (using a mask if available)", default=False)  # type: ignore
+    tex_metallic: FloatProperty(name="Metallic", subtype='PERCENTAGE', min=0.0, max=100.0, default=50.0)  # type: ignore
+    tex_size_enabled: BoolProperty(name="Toggle Resize", default=False)  # type: ignore
+    tex_size: EnumProperty(name="Size", items=constants.TEXTURE_SIZES, default='4096')  # type: ignore
+    tex_compression_enabled: BoolProperty(name="Toggle Compression", default=False)  # type: ignore
+    tex_compression: EnumProperty(
+        name="Compression",
+        items=[
+            ('AUTO',     'Auto',           'Preserve details — Minimum quality'),
+            ('SMALLEST', 'Smallest Size',  'Lighter size, Lower quality'),
+            ('BALANCED', 'Balanced',       'Moderate size — Medium quality'),
+            ('HIGHER',   'Higher Quality', 'Heavier size — Higher quality'),
+        ],
+        default='AUTO',
+    )  # type: ignore
+    tex_format_enabled: BoolProperty(name="Toggle Reformat", default=False)  # type: ignore
+    tex_format: EnumProperty(
+        name="Format",
+        items=[
+            ('AUTO', 'Auto', ''),
+            ('JPG',  'JPG',  ''),
+            ('PNG',  'PNG',  ''),
+            ('WEBP', 'WEBP', ''),
+        ],
+    )  # type: ignore
 
     def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self, width=280, confirm_text="Change")
+        global _tex_groups, _tex_current_group
+        _tex_groups.clear()
+        _tex_current_group = 0
+        if hasattr(context.scene, "optiflow_tex_display"):
+            context.scene.optiflow_tex_display.clear()
+        context.scene.optiflow_change_obj_path = ""
+        self.preset                 = constants.MESH_TYPE[0][0] if constants.MESH_TYPE else 'TILE'
+        self.item_merge             = 'OFF'
+        self.tex_roughness_enabled  = False
+        self.tex_roughness          = 50.0
+        self.tex_metallic_enabled   = False
+        self.tex_metallic           = 50.0
+        self.tex_size_enabled       = False
+        self.tex_size               = '4096'
+        self.tex_compression_enabled = False
+        self.tex_compression        = 'AUTO'
+        self.tex_format_enabled     = False
+        self.tex_format             = 'JPG'
+        return context.window_manager.invoke_props_dialog(self, width=420, confirm_text="Change")
 
     def draw(self, context):
         layout = self.layout
-        layout.prop(self, "preset")
-        layout.separator(type="LINE")
+        row = layout.row(align=True)
+        row.prop(self, "item_mode", expand=True)
+        layout.separator(type='LINE')
+        if self.item_mode == 'PRESET':
+            prop_input(layout, self, "Mesh:", "preset")
+        elif self.item_mode == 'OBJECT':
+            file_input(layout, context.scene, "Object:", "optiflow_change_obj_path",
+                       file_types="fbx,obj,glb,gltf,abc,usd,usda,usdc,dae,stl,ply,x3d")
+            prop_input(layout, self, "Merge:", "item_merge", expand=True)
+        layout.separator(type='LINE')
+        row = layout.row(align=True)
+        row.operator("optiflow.select_textures", text="Add Texture(s)")
+        if _tex_groups:
+            row.operator("optiflow.clear_textures", text="", icon='X')
+        else:
+            row.operator("optiflow.select_textures", text="", icon='IMPORT')
+        layout.separator(type='LINE')
+        if _tex_groups:
+            group_keys = list(_tex_groups.keys())
+            n_groups   = len(group_keys)
+            group_idx  = max(0, min(_tex_current_group, n_groups - 1))
+            if n_groups > 1:
+                display_name = group_keys[group_idx] if group_keys[group_idx] else "——"
+                count_str    = f"{group_idx + 1:02d}/{n_groups:02d}"
+                row = layout.row(align=True)
+                sub = row.row(align=True)
+                sub.enabled = group_idx > 0
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_LEFT_BAR")
+                op.action = 'FIRST'
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_LEFT")
+                op.action = 'PREV'
+                mid = row.row()
+                mid.alignment = 'CENTER'
+                mid.label(text=f"{display_name} ({count_str})" if group_keys[group_idx] else f"{display_name}")
+                sub = row.row(align=True)
+                sub.enabled = group_idx < n_groups - 1
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT")
+                op.action = 'NEXT'
+                op = sub.operator("optiflow.tex_group_nav", text="", icon="TRIA_RIGHT_BAR")
+                op.action = 'LAST'
+                last = row.row(align=True)
+                last.operator("optiflow.remove_tex_group", text="", icon='TRASH')
+            layout.template_list(
+                "OPT_UL_tex_list", "",
+                context.scene, "optiflow_tex_display",
+                context.scene, "optiflow_tex_display_index",
+                rows=6,
+            )
+            for label, enabled_prop, value_prop, slider in [
+                ("Roughness:", "tex_roughness_enabled", "tex_roughness",       True),
+                ("Metallic:",  "tex_metallic_enabled",  "tex_metallic",        True),
+                ("Size:",      "tex_size_enabled",      "tex_size",            False),
+                ("Compression:", "tex_compression_enabled", "tex_compression", False),
+                ("Format:",    "tex_format_enabled",    "tex_format",          False),
+            ]:
+                split = layout.split(factor=0.23)
+                split.label(text=label)
+                row = split.row(align=True)
+                row.prop(self, enabled_prop, text="", icon="DOT", toggle=True)
+                sub = row.row(align=True)
+                sub.enabled = getattr(self, enabled_prop)
+                sub.prop(self, value_prop, text="", slider=slider)
 
     def execute(self, context):
-        mesh_objs = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        overrides = {
+            'item_merge':          str(self.item_merge),
+            'roughness_enabled':   bool(self.tex_roughness_enabled),
+            'roughness':           float(self.tex_roughness),
+            'metallic_enabled':    bool(self.tex_metallic_enabled),
+            'metallic':            float(self.tex_metallic),
+            'size_enabled':        bool(self.tex_size_enabled),
+            'size':                str(self.tex_size),
+            'compression_enabled': bool(self.tex_compression_enabled),
+            'compression':         str(self.tex_compression),
+            'format_enabled':      bool(self.tex_format_enabled),
+            'format':              str(self.tex_format),
+        }
+        if self.item_mode == 'PRESET':
+            return self._exec_preset(context, overrides)
+        return self._exec_object(context, overrides)
+
+    def _exec_preset(self, context, overrides):
+        _SKIP = frozenset({'COL', 'PLACER', 'SNAP', 'GUIDE'})
+        scene     = context.scene
+        mesh_objs = [
+            obj for obj in context.selected_objects
+            if obj.type == 'MESH' and helpers.get_prefix(obj) not in _SKIP
+        ]
         if not mesh_objs:
-            self.report({'WARNING'}, "No mesh objects selected.")
+            self.report({'WARNING'}, "No valid mesh objects selected.")
             return {'CANCELLED'}
 
         template_mesh = _import_template_mesh(self.preset)
@@ -1241,8 +1383,7 @@ class OPT_OT_set_preset(Operator):
             self.report({'ERROR'}, f"Preset mesh template '{self.preset}' not found.")
             return {'CANCELLED'}
 
-        # Build a map of object pointer → (gi, ii) for OptiFlow items
-        scene     = context.scene
+        has_tex     = bool(_tex_groups)
         obj_to_item = {}
         for gi, group in enumerate(scene.optiflow_groups):
             for ii, item in enumerate(group.items):
@@ -1250,35 +1391,239 @@ class OPT_OT_set_preset(Operator):
                     if ref.object is not None:
                         obj_to_item[ref.object.as_pointer()] = (gi, ii)
 
-        updated_items = set()
-        for obj in mesh_objs:
-            old_materials  = [slot.material for slot in obj.material_slots]
-            old_mesh       = obj.data
-            old_mesh.name  = f"__del_{old_mesh.name}"
-            new_mesh       = template_mesh.copy()
-            new_mesh.name  = obj.name
-            obj.data       = new_mesh
+        # Map each affected item to the one primary object that will receive the preset.
+        # The first selected non-collider object found for an item wins.
+        item_primary  = {}   # (gi, ii) → primary obj
+        all_replaced  = []
+
+        for sel_obj in mesh_objs:
+            key = sel_obj.as_pointer()
+            if key in obj_to_item:
+                gi, ii = obj_to_item[key]
+                if (gi, ii) not in item_primary:
+                    item_primary[(gi, ii)] = sel_obj
+            else:
+                # Standalone object (not in any item): replace directly
+                old_materials = [] if has_tex else [slot.material for slot in sel_obj.material_slots]
+                old_mesh      = sel_obj.data
+                old_mesh.name = f"__del_{old_mesh.name}"
+                new_mesh      = template_mesh.copy()
+                new_mesh.name = sel_obj.name
+                sel_obj.data  = new_mesh
+                sel_obj.data.materials.clear()
+                for mat in old_materials:
+                    sel_obj.data.materials.append(mat)
+                if old_mesh.users == 0:
+                    bpy.data.meshes.remove(old_mesh)
+                all_replaced.append(sel_obj)
+
+        # For each affected item: apply preset to the primary object only and
+        # delete every other linked object — a preset item holds exactly one mesh.
+        for (gi, ii), primary in item_primary.items():
+            item = scene.optiflow_groups[gi].items[ii]
+
+            old_materials = [] if has_tex else [slot.material for slot in primary.material_slots]
+            old_mesh      = primary.data
+            old_mesh.name = f"__del_{old_mesh.name}"
+            new_mesh      = template_mesh.copy()
+            new_mesh.name = primary.name
+            primary.data  = new_mesh
+            primary.data.materials.clear()
+            for mat in old_materials:
+                primary.data.materials.append(mat)
+            if old_mesh.users == 0:
+                bpy.data.meshes.remove(old_mesh)
+            all_replaced.append(primary)
+
+            # Collect objects referenced by OTHER items so we don't delete shared objects
+            referenced_elsewhere = helpers.collect_referenced_ptrs(
+                scene.optiflow_groups, skip_item_ptr=item.as_pointer()
+            )
+
+            # Delete objects that are exclusive to this item; merely unlink shared ones
+            for ref in item.objects:
+                obj = ref.object
+                if obj is None or obj is primary:
+                    continue
+                if obj.as_pointer() not in referenced_elsewhere:
+                    bpy.data.objects.remove(obj, do_unlink=True)
+                # Shared objects are implicitly dropped by item.objects.clear() below
+
+            # Rebuild the item's object list with just the primary + trailing slot
+            item.objects.clear()
+            item.objects.add().object = primary
+            item.objects.add()
+
+            item.item_type = 'PRESET'
+            item.preset    = self.preset
+
+        if item_primary:
+            helpers.rebuild_flat_entries(scene)
+
+        if has_tex:
+            self._apply_textures(context, scene, all_replaced, overrides)
+
+        helpers.tag_redraw_all(context)
+        self.report({'INFO'}, f"Applied preset '{self.preset}' to {len(all_replaced)} object(s).")
+        return {'FINISHED'}
+
+    def _exec_object(self, context, overrides):
+        _SKIP    = frozenset({'COL', 'PLACER', 'SNAP', 'GUIDE'})
+        scene    = context.scene
+        obj_path = bpy.path.abspath(scene.optiflow_change_obj_path) if scene.optiflow_change_obj_path else ""
+        if not obj_path or not os.path.isfile(obj_path):
+            self.report({'ERROR'}, "Invalid object path")
+            return {'CANCELLED'}
+
+        target_objs = [
+            obj for obj in context.selected_objects
+            if obj.type == 'MESH' and helpers.get_prefix(obj) not in _SKIP
+        ]
+        if not target_objs:
+            self.report({'WARNING'}, "No valid mesh objects selected")
+            return {'CANCELLED'}
+
+        imported = _import_3d(obj_path)
+        if imported is None:
+            self.report({'ERROR'}, f"Unsupported format: {os.path.splitext(obj_path)[1]}")
+            return {'CANCELLED'}
+        if not imported:
+            self.report({'ERROR'}, "No objects imported from file")
+            return {'CANCELLED'}
+
+        _strip_materials(imported)
+
+        do_merge = overrides.get('item_merge') == 'ON'
+
+        if do_merge:
+            work_list = _merge_meshes(imported)
+            if not work_list:
+                self.report({'ERROR'}, "No mesh objects remain after merge")
+                return {'CANCELLED'}
+            template_obj = next((o for o in work_list if o.type == 'MESH' and not _is_collider_mesh(o)), None)
+            if template_obj is None:
+                for o in work_list:
+                    bpy.data.objects.remove(o, do_unlink=True)
+                self.report({'ERROR'}, "No mesh found after merge")
+                return {'CANCELLED'}
+            extra_objs = [o for o in work_list if o is not template_obj]
+        else:
+            # Remove non-mesh objects; keep all mesh objects
+            for o in [o for o in imported if o.type != 'MESH']:
+                bpy.data.objects.remove(o, do_unlink=True)
+            mesh_imported = [o for o in imported if o.type == 'MESH']
+            template_obj = next((o for o in mesh_imported if not _is_collider_mesh(o)), None)
+            if template_obj is None:
+                for o in mesh_imported:
+                    bpy.data.objects.remove(o, do_unlink=True)
+                self.report({'ERROR'}, "No mesh found in the imported file")
+                return {'CANCELLED'}
+            extra_objs = [o for o in mesh_imported if o is not template_obj]
+
+        template_mesh         = template_obj.data
+        template_world_mat_inv = template_obj.matrix_world.inverted_safe()
+        # Snapshot full world matrices before any mutation so every target gets
+        # its own correct relative transform regardless of prior-iteration mutations
+        extra_orig_matrices = [o.matrix_world.copy() for o in extra_objs]
+
+        # Build obj-pointer → (gi, ii) map for link preservation
+        obj_to_item = {}
+        for gi, group in enumerate(scene.optiflow_groups):
+            for ii, item in enumerate(group.items):
+                for ref in item.objects:
+                    if ref.object is not None:
+                        obj_to_item[ref.object.as_pointer()] = (gi, ii)
+
+        has_tex = bool(_tex_groups)
+
+        for idx, obj in enumerate(target_objs):
+            old_materials = [] if has_tex else [slot.material for slot in obj.material_slots]
+            old_mesh      = obj.data
+            old_mesh.name = f"__del_{old_mesh.name}"
+            new_mesh      = template_mesh.copy()
+            new_mesh.name = obj.name
+            obj.data      = new_mesh
             obj.data.materials.clear()
             for mat in old_materials:
                 obj.data.materials.append(mat)
             if old_mesh.users == 0:
                 bpy.data.meshes.remove(old_mesh)
 
+            if extra_objs:
+                # First target uses imported extras directly; subsequent targets get deep copies
+                if idx == 0:
+                    current_extras = extra_objs
+                else:
+                    current_extras = _duplicate_objs(extra_objs)
+
+                # Reconstruct each extra's world matrix by composing the target
+                # object's transform with the extra's original transform relative
+                # to the template — preserves rotation and scale for all targets
+                for extra, orig_matrix in zip(current_extras, extra_orig_matrices):
+                    extra.matrix_world = obj.matrix_world @ (template_world_mat_inv @ orig_matrix)
+
+                # Propagate the selected object's materials to non-collider extras
+                # when no texture group is provided
+                if not has_tex and old_materials:
+                    for extra in current_extras:
+                        if extra.type == 'MESH' and not _is_collider_mesh(extra):
+                            extra.data.materials.clear()
+                            for mat in old_materials:
+                                extra.data.materials.append(mat)
+
+                key = obj.as_pointer()
+                if key in obj_to_item:
+                    gi, ii   = obj_to_item[key]
+                    opt_item = scene.optiflow_groups[gi].items[ii]
+                    if opt_item.objects and opt_item.objects[-1].object is None:
+                        opt_item.objects.remove(len(opt_item.objects) - 1)
+                    for extra in current_extras:
+                        opt_item.objects.add().object = extra
+                    opt_item.objects.add()  # trailing empty slot
+
+        # Remove only the template source object; extras are now in the scene
+        bpy.data.objects.remove(template_obj, do_unlink=True)
+
+        # Update item_type to OBJECT for every affected item
+        updated_items = set()
+        for obj in target_objs:
             key = obj.as_pointer()
             if key in obj_to_item:
-                gi, ii = obj_to_item[key]
-                updated_items.add((gi, ii))
-
+                updated_items.add(obj_to_item[key])
         for gi, ii in updated_items:
-            item           = scene.optiflow_groups[gi].items[ii]
-            item.item_type = 'PRESET'
-            item.preset    = self.preset
-
+            scene.optiflow_groups[gi].items[ii].item_type = 'OBJECT'
         if updated_items:
             helpers.rebuild_flat_entries(scene)
 
-        self.report({'INFO'}, f"Applied preset '{self.preset}' to {len(mesh_objs)} object(s).")
+        if has_tex:
+            self._apply_textures(context, scene, target_objs, overrides)
+
+        helpers.tag_redraw_all(context)
+        self.report({'INFO'}, f"Changed model of {len(target_objs)} object(s).")
         return {'FINISHED'}
+
+    def _apply_textures(self, context, scene, mesh_objs, overrides):
+        """Schedule texture import after mesh replacement, mirroring Change Textures behavior."""
+        from .tex_import import schedule_tex_import
+
+        group_keys  = list(_tex_groups.keys())
+        group_idx   = max(0, min(_tex_current_group, len(group_keys) - 1))
+        group_paths = _tex_groups[group_keys[group_idx]]
+        n_objs      = len(mesh_objs)
+
+        if n_objs > 1:
+            colors = [p for p in group_paths if _classify_tex(os.path.basename(p)) == 'Color']
+            if len(colors) > 1:
+                schedule_tex_import(-1, -1, [o.name for o in mesh_objs], group_paths,
+                                    {**overrides, 'change_tex': True}, scene)
+            else:
+                schedule_tex_import(-1, -1, [o.name for o in mesh_objs], group_paths, overrides, scene)
+        else:
+            colors    = [p for p in group_paths if _classify_tex(os.path.basename(p)) == 'Color']
+            shared    = [p for p in group_paths if _classify_tex(os.path.basename(p)) != 'Color']
+            col_path  = colors[0] if colors else None
+            tex_paths = ([col_path] if col_path else []) + shared
+            schedule_tex_import(-1, -1, [mesh_objs[0].name], tex_paths, overrides, scene)
 
 # endregion
 
@@ -1331,7 +1676,11 @@ def _import_template_mesh(preset_type):
     """
     cached = _template_mesh_cache.get(preset_type)
     if cached is not None:
-        return cached
+        try:
+            _ = cached.name  # validate the C data is still live after an undo
+            return cached
+        except ReferenceError:
+            _template_mesh_cache.pop(preset_type, None)
     mesh_filename = f"MESH_{preset_type}.fbx"
     addon_dir     = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     mesh_path     = os.path.join(addon_dir, "meshes", mesh_filename)
