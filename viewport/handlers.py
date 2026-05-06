@@ -48,6 +48,8 @@ def _sync_isolation_borders():
 @persistent
 def _on_load_post(dummy):
     """Restart key listener and sync isolation state on file load."""
+    from ..operators.items import _template_mesh_cache
+    _template_mesh_cache.clear()
     bpy.app.timers.register(_start_key_listener, first_interval=0.15)
     bpy.app.timers.register(_sync_isolation_borders, first_interval=0.15)
 
@@ -247,7 +249,9 @@ def register():
 def unregister():
     """Unregister scene properties and handlers."""
     from ..operators.tex_import import cancel_all
+    from ..operators.items import _clear_template_mesh_cache
     cancel_all()
+    _clear_template_mesh_cache()
     for handler_list in (bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         if _on_undo_redo in handler_list:
             handler_list.remove(_on_undo_redo)

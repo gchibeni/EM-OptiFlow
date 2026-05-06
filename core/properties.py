@@ -44,7 +44,6 @@ def _on_object_ref_update(self, context):
         return
     for gi, group in enumerate(scene.optiflow_groups):
         for ii, item in enumerate(group.items):
-            helpers.clean_stale_refs(item)
             if item.objects and item.objects[-1].as_pointer() == self.as_pointer():
                 pending_trailing_slot = (gi, ii)
                 bpy.app.timers.register(_do_add_trailing, first_interval=0.0)

@@ -1018,6 +1018,7 @@ class OPT_OT_edit_item(Operator):
         if fe is None or fe.entry_type == 'GROUP':
             return {'CANCELLED'}
         item = context.scene.optiflow_groups[fe.group_index].items[fe.item_index]
+        helpers.clean_stale_refs(item)
         # Snapshot current values into the buffer
         self.edit_name      = item.name
         self.edit_batch     = item.batch
@@ -1276,9 +1277,6 @@ class OPT_OT_set_preset(Operator):
         if updated_items:
             helpers.rebuild_flat_entries(scene)
 
-        if template_mesh.users == 0:
-            bpy.data.meshes.remove(template_mesh)
-
         self.report({'INFO'}, f"Applied preset '{self.preset}' to {len(mesh_objs)} object(s).")
         return {'FINISHED'}
 
@@ -1309,8 +1307,31 @@ class OPT_OT_reapply_names(Operator):
 
 # region Mesh Templates
 
+_template_mesh_cache: dict = {}
+
+
+def _clear_template_mesh_cache():
+    """Release fake-user pins and remove cached template meshes from bpy.data."""
+    for mesh in _template_mesh_cache.values():
+        try:
+            mesh.use_fake_user = False
+            if mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
+        except Exception:
+            pass
+    _template_mesh_cache.clear()
+
+
 def _import_template_mesh(preset_type):
-    """Import the FBX template for a mesh type, return the Mesh datablock."""
+    """Return a cached template mesh for preset_type, importing from FBX on first access.
+
+    The mesh is kept alive with a fake user so the undo system never encounters
+    a freed pointer — the import operator's undo state and the outer UNDO operator
+    both stay consistent.
+    """
+    cached = _template_mesh_cache.get(preset_type)
+    if cached is not None:
+        return cached
     mesh_filename = f"MESH_{preset_type}.fbx"
     addon_dir     = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     mesh_path     = os.path.join(addon_dir, "meshes", mesh_filename)
@@ -1327,8 +1348,10 @@ def _import_template_mesh(preset_type):
             bpy.data.objects.remove(obj, do_unlink=True)
         return None
     template_mesh = template_obj.data
+    template_mesh.use_fake_user = True
     for obj in imported:
         bpy.data.objects.remove(obj, do_unlink=True)
+    _template_mesh_cache[preset_type] = template_mesh
     return template_mesh
 
 
@@ -1365,8 +1388,5 @@ def _apply_preset(context, item, preset_type):
                 obj.data.materials.append(mat)
             if old_mesh.users == 0:
                 bpy.data.meshes.remove(old_mesh)
-    # Clean up template if unused
-    if template_mesh.users == 0:
-        bpy.data.meshes.remove(template_mesh)
 
 # endregion
