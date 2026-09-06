@@ -187,4 +187,4 @@ The Google Sheets integration uses OAuth2 with the **Google Sheets API (read-onl
 3. Go to **Edit → Preferences → Add-ons → OptiFlow → Presets** and click **Import Preset**, or drop the file directly into the `meshes/` folder inside the addon directory
 4. The new preset appears immediately in the Mesh dropdown
 
-Presets can be renamed or deleted from the same Preferences panel. The built-in `TILE` preset cannot be deleted.
+Presets can be renamed or deleted from the same Preferences panel.
